@@ -29,9 +29,10 @@ format-sheet:              # dropdowns, colours, frozen header and help tab on t
 	$(RUN) python -m ingest.sheet_format
 up:
 	UID=$$(id -u) docker compose up -d --build dashboard docs
-	@echo "Dashboard   http://localhost:8501"
-	@echo "dbt docs    http://localhost:8091"
-	@echo "Airflow     http://localhost:8092  (shared platform: $(AIRFLOW_PLATFORM))"
+	@host=$${TAILSCALE_IP:-$$(sed -n 's/^TAILSCALE_IP=//p' .env 2>/dev/null)}; host=$${host:-localhost}; \
+	echo "Dashboard   http://$$host:8501"; \
+	echo "dbt docs    http://$$host:8091"; \
+	echo "Airflow     http://$$host:8092  (shared platform: $(AIRFLOW_PLATFORM))"
 down:
 	UID=$$(id -u) docker compose down
 logs:
