@@ -1,0 +1,27 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Fetch ECharts (same pinned file as the Dockerfile)
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/echarts.min.js" https://cdn.jsdelivr.net/npm/echarts@5.5.1/dist/echarts.min.js
+          echo "e84270bd0cd5bdf60fefc26d00c2a391cb2e81f4d26a7a9ee16185a54773a3cf  $RUNNER_TEMP/echarts.min.js" | sha256sum -c -
+          echo "CNP_ECHARTS=$RUNNER_TEMP/echarts.min.js" >> "$GITHUB_ENV"
+      - run: pytest -q

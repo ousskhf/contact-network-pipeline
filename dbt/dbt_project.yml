@@ -1,0 +1,14 @@
+name: cnp
+version: "1.0.0"
+profile: cnp
+model-paths: ["models"]
+macro-paths: ["macros"]
+test-paths: ["tests"]
+target-path: "target"
+log-path: "logs"
+models:
+  cnp:
+    staging:
+      +materialized: view
+    marts:
+      +materialized: table

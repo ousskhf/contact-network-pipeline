@@ -1,0 +1,18 @@
+version: 2
+models:
+  - name: dim_person
+    columns:
+      - name: person_id
+        tests: [unique, not_null]
+  - name: bridge_person_phone
+    columns:
+      - name: person_id
+        tests: [not_null]
+      - name: phone_norm
+        tests: [not_null]
+  - name: fct_network_membership
+    columns:
+      - name: member_row
+        tests: [unique, not_null]
+      - name: user_id
+        tests: [unique]

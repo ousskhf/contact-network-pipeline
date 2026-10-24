@@ -1,0 +1,17 @@
+# Real data and credentials never committed
+data/*
+!data/.gitkeep
+accounts.json
+downline_raw*.json
+*.duckdb
+.env
+
+__pycache__/
+*.py[cod]
+.pytest_cache/
+dbt/target/
+dbt/logs/
+.DS_Store
+dbt/.user.yml
+dags/__pycache__/
+.airflow/

@@ -1,0 +1,34 @@
+# Web UIs bind to 127.0.0.1 only (never the LAN).
+x-app: &app
+  build: .
+  image: cnp-app:latest   # a shared Airflow platform can run the DAG tasks in this image
+  working_dir: /work
+  user: "${UID:-1000}:${UID:-1000}"
+  volumes:
+    - .:/work
+  environment: &app-env
+    - CNP_DATA_DIR=${CNP_DATA_DIR:-fixtures}
+    - CNP_DB=${CNP_DB:-data/cnp.duckdb}
+    - CNP_EXPORT=${CNP_EXPORT:-data/contact_tracker.csv}
+    - CNP_OUTREACH=${CNP_OUTREACH:-data/outreach.duckdb}
+    - CNP_SHEET_ID=${CNP_SHEET_ID:-}
+    - CNP_GOOGLE_CREDENTIALS=${CNP_GOOGLE_CREDENTIALS:-data/google-service-account.json}
+    - HOME=/tmp
+
+services:
+  app:                       # one-off commands: make run / test / export
+    <<: *app
+
+  dashboard:                 # http://localhost:8501
+    <<: *app
+    command: streamlit run app/dashboard.py --server.address 0.0.0.0 --server.headless true
+    ports:
+      - "127.0.0.1:8501:8501"
+    restart: unless-stopped
+
+  docs:                      # http://localhost:8091  (dbt model docs + lineage graph)
+    <<: *app
+    command: sh -c "dbt docs generate --project-dir dbt --profiles-dir dbt >/dev/null && dbt docs serve --project-dir dbt --profiles-dir dbt --host 0.0.0.0 --port 8081 --no-browser"
+    ports:
+      - "127.0.0.1:8091:8081"
+    restart: unless-stopped

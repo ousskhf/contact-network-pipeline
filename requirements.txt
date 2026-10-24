@@ -1,0 +1,8 @@
+duckdb
+dbt-duckdb
+streamlit
+pandas
+pytest
+requests
+plotly
+gspread
