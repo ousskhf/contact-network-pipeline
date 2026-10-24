@@ -21,8 +21,11 @@ All taken on the synthetic fixtures (`make demo`), so every name and number is f
 
 ## Quickstart
 
-Requires Docker. The web UIs listen on `127.0.0.1` only. They would hold personal data with real
-exports, so do not expose them beyond your machine.
+Requires Docker. The web UIs listen on `127.0.0.1` only by default. They would hold personal data with real
+exports, so do not expose them beyond your machine. To reach them from your other devices over Tailscale, set
+`TAILSCALE_IP` in `.env` (gitignored, see `.env.example`): the ports then bind to that address only, never the
+LAN, and the Homepage tile labels on the `dashboard` and `docs` services point at it. The URLs below use
+`localhost`; swap in that address when it is set.
 
 ```
 make build   # build the image once

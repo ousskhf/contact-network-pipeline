@@ -1,4 +1,4 @@
-# Web UIs bind to 127.0.0.1 only (never the LAN).
+# Web UIs bind to 127.0.0.1 unless TAILSCALE_IP is set in .env (gitignored); never the LAN.
 x-app: &app
   build: .
   image: cnp-app:latest   # a shared Airflow platform can run the DAG tasks in this image
@@ -23,12 +23,24 @@ services:
     <<: *app
     command: streamlit run app/dashboard.py --server.address 0.0.0.0 --server.headless true
     ports:
-      - "127.0.0.1:8501:8501"
+      - "${TAILSCALE_IP:-127.0.0.1}:8501:8501"
     restart: unless-stopped
+    labels:
+      - homepage.group=Personal
+      - homepage.name=Contact Network
+      - homepage.icon=mdi-account-network
+      - homepage.href=http://${TAILSCALE_IP:-127.0.0.1}:8501
+      - homepage.description=Contacts and network dashboard
 
   docs:                      # http://localhost:8091  (dbt model docs + lineage graph)
     <<: *app
     command: sh -c "dbt docs generate --project-dir dbt --profiles-dir dbt >/dev/null && dbt docs serve --project-dir dbt --profiles-dir dbt --host 0.0.0.0 --port 8081 --no-browser"
     ports:
-      - "127.0.0.1:8091:8081"
+      - "${TAILSCALE_IP:-127.0.0.1}:8091:8081"
     restart: unless-stopped
+    labels:
+      - homepage.group=Personal
+      - homepage.name=Contact Network dbt docs
+      - homepage.icon=mdi-graph-outline
+      - homepage.href=http://${TAILSCALE_IP:-127.0.0.1}:8091
+      - homepage.description=dbt models and lineage
