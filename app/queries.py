@@ -60,6 +60,35 @@ def merge_report(con, exclude=()):
     ).df()
 
 
+def _optional(con, sql, params, columns):
+    """A model added after the last pipeline run is not in the warehouse yet: show an empty list, not a crash."""
+    try:
+        return con.execute(sql, params).df()
+    except duckdb.CatalogException:
+        return pd.DataFrame(columns=columns)
+
+
+def merge_conflicts(con, exclude=()):
+    """Merged contact people whose rows carry names that do not match: different people on one number, or one
+    person spelled differently."""
+    return _optional(
+        con, "select person_id, n_name_conflicts as conflits, n_rows as lignes, names as noms "
+             "from main.merge_review where names_conflict and not list_contains(?::BIGINT[], person_id) "
+             "order by n_name_conflicts desc, person_id", [_ids(exclude)], ["person_id", "conflits", "lignes", "noms"])
+
+
+def same_number_links(con, exclude=()):
+    """Network members linked to a contact only because they share a number, not because the names fit."""
+    return _optional(
+        con, "select f.name as membre, concat_ws(' | ', d.name, d.aliases) as \"contact avec ce numéro\", "
+             "(select max(p.n_members) from main.phone_share p where p.phone_norm in (s.phone_norm, s.phone2_norm)) "
+             "as \"membres sur ce numéro\" "
+             "from main.fct_network_membership f join main.dim_person d using (person_id) "
+             "join main.stg_network s using (member_row) "
+             "where f.link_kind = 'same_number' and not list_contains(?::BIGINT[], f.person_id) "
+             "order by f.member_row", [_ids(exclude)], ["membre", "contact avec ce numéro", "membres sur ce numéro"])
+
+
 def quality(con) -> dict:
     return {
         "invalid_numbers": con.execute("select count(*) from main.bridge_person_phone where not is_valid").fetchone()[0],

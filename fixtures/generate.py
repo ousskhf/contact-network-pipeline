@@ -3,7 +3,8 @@
 Writes fixtures/contacts.csv (Google Contacts export shape) and
 fixtures/downline.json (API shape, including sensitive fields that the
 loader must drop). Edge cases covered on purpose: formatting variants of one
-number, a contact with 4 numbers, a one-digit-swap typo pair, duplicate rows.
+number, a contact with 4 numbers, a one-digit-swap typo pair, duplicate rows,
+a number shared by two network members and a contact.
 """
 import csv
 import json
@@ -44,6 +45,11 @@ def contacts():
 GRADES = [("Bronze", 100), ("Silver", 120), ("Gold", 900), ("Platinum", 24000)]
 
 
+def _phone(i, shared):
+    n = num() if i else shared          # keep the random sequence: member 1 only swaps its number for the shared one
+    return shared if i == 1 else n      # two members behind one number, like a delivery handler
+
+
 def downline(contact_rows):
     items = []
     shared = contact_rows[3]["Phone 1 - Value"]
@@ -52,7 +58,7 @@ def downline(contact_rows):
         items.append({
             "userId": 500 + i, "sponsorId": 500 if i else 1, "depth": 1 if i < 6 else 2, "directCount": i % 3,
             "user": {"firstName": random.choice(FIRST), "lastName": f"Net{i}",
-                     "phoneNumber": shared if i == 0 else num(), "phoneNumber2": None,
+                     "phoneNumber": _phone(i, shared), "phoneNumber2": None,
                      "boutiqueCode": f"B{i:03d}", "numeroMembre": 1000 + i,
                      "birthDate": f"19{80 + i}-{(i % 12) + 1:02d}-{(i * 2) % 27 + 1:02d}T00:00:00.000Z",
                      "gradeId": gid, "grade": {"name": GRADES[gid - 1][0]},
