@@ -27,7 +27,14 @@ import pandas as pd
 from ingest import locations, outreach
 
 NOTES_HEADER = "Notes perso"                       # Sheet header for the personal notes (outreach field "Notes")
-PIPELINE_COLUMNS = ["Grade", "Actif"]               # network data: the pipeline value always overwrites the Sheet
+ID_HEADER = "ID Membre"                            # Sheet header for the network member's stable id (see sync_key)
+# network data: the pipeline value always overwrites the Sheet. ID_HEADER is written like the rest, so a
+# network-only row's identity survives a retyped/recapitalised name on the next sync (see sync_key).
+PIPELINE_COLUMNS = ["Grade", "Actif", "Sponsor", "Directs", "Profondeur",
+                     "CA Personnel Terminé", "CA Personnel En Attente",
+                     "CA Équipe Terminé", "CA Équipe En Attente",
+                     "Objectif Grade", "Taux Bonus", "Grade Suivant", ID_HEADER]
+PIPELINE_RENAMES = {ID_HEADER: "user_id"}           # Sheet header -> tracker/current dataframe column, where they differ
 READ_ONLY = {"Nom", "Téléphone", "Téléphone 2", "Téléphone 3", "Autres numéros", "Notes", *PIPELINE_COLUMNS}
 SYNCED = [NOTES_HEADER if f == "Notes" else f for f in outreach.ALLOWED]
 
@@ -36,21 +43,47 @@ def phone_key(value) -> str:
     return re.sub(r"\D", "", str(value or "")).lstrip("0")
 
 
-def sync_key(phone, name, notes) -> str:
-    """Identity of a row: its normalised phone; network-only members add their name (they can share a phone)."""
+def _id_suffix(name, user_id) -> str:
+    """user_id (the source system's stable member id) when present, else the lowercased name as a fallback (a Sheet row
+    the pipeline hasn't written ID_HEADER to yet, or older stored data) -- see outreach._network_suffix."""
+    has_id = user_id is not None and user_id is not pd.NA and not (isinstance(user_id, float) and pd.isna(user_id))
+    if has_id:
+        s = str(user_id).strip()
+        if s and s.lower() != "nan":
+            try:
+                return str(int(float(s)))
+            except (TypeError, ValueError):
+                pass
+    return str(name or "").strip().lower()
+
+
+def sync_key(phone, name, notes, user_id=None) -> str:
+    """Identity of a row: its normalised phone; network-only members (which can share a phone) add their
+    stable user_id, or their name when no user_id is known yet."""
     key = phone_key(phone)
     if str(notes or "").startswith(outreach.NETWORK_NOTE):
-        return f"{key}#{str(name or '').strip().lower()}"
+        return f"{key}#{_id_suffix(name, user_id)}"
     return key
 
 
+WHOLE_NUMBER_COLUMNS = {ID_HEADER, "Directs", "Profondeur"}    # pandas gives these as float (NaN-able ints)
+
+
 def norm(header: str, value) -> str:
-    v = "" if value is None or (isinstance(value, float) and pd.isna(value)) else str(value).strip()
+    # value can be a nullable pandas extension type (pd.NA) for an integer column with nulls
+    # (e.g. Directs, Profondeur, from duckdb's integer -> pandas Int64 conversion), not just a float NaN.
+    na = value is pd.NA or (isinstance(value, float) and pd.isna(value))
+    v = "" if value is None or na else str(value).strip()
     if header == "Ville":                              # old entries read "Région - Ville"
         return locations.strip_region(v)
     if header in outreach.DATE_FIELDS and v:
         t = pd.to_datetime(v, dayfirst="/" in v, errors="coerce")
         return t.date().isoformat() if pd.notna(t) else v
+    if header in WHOLE_NUMBER_COLUMNS and v:
+        try:
+            return str(int(float(v)))
+        except (TypeError, ValueError):
+            pass
     return v
 
 
@@ -91,11 +124,12 @@ def plan_sync(rows: list[list[str]], original: pd.DataFrame, current: pd.DataFra
             out.cells[(1, len(header))] = h
     col = {h: i for i, h in enumerate(header)}
     custom = [h for h in header if h not in READ_ONLY and h not in SYNCED]
+    col_of = lambda h: PIPELINE_RENAMES.get(h, h)      # Sheet header -> current/original dataframe column
 
     sheet_rows = {}
     for n, row in enumerate(rows[1:], start=2):
         at = lambda h: row[col[h]] if h in col and col[h] < len(row) else ""
-        key = sync_key(at("Téléphone"), at("Nom"), at("Notes"))
+        key = sync_key(at("Téléphone"), at("Nom"), at("Notes"), at(ID_HEADER))
         if not phone_key(at("Téléphone")):
             continue
         if key in sheet_rows:
@@ -105,12 +139,14 @@ def plan_sync(rows: list[list[str]], original: pd.DataFrame, current: pd.DataFra
 
     seen = set()
     for i in range(len(current)):
-        key = sync_key(current["Téléphone"].iat[i], current["Nom"].iat[i], current["Notes"].iat[i])
+        key = sync_key(current["Téléphone"].iat[i], current["Nom"].iat[i], current["Notes"].iat[i],
+                       current["user_id"].iat[i] if "user_id" in current.columns else None)
         if not phone_key(current["Téléphone"].iat[i]) or key in seen:
             continue
         seen.add(key)
         if key not in sheet_rows:
-            out.appended.append([norm(h, current[h].iat[i]) if h in current.columns else "" for h in header])
+            out.appended.append([norm(h, current[col_of(h)].iat[i]) if col_of(h) in current.columns else ""
+                                 for h in header])
             for h in SYNCED:
                 if h in current.columns:
                     out.base[(key, h)] = norm(h, current[h].iat[i])
@@ -129,7 +165,7 @@ def plan_sync(rows: list[list[str]], original: pd.DataFrame, current: pd.DataFra
                 out.conflicts.append((current["Nom"].iat[i], h, s, d))
             out.base[(key, h)] = final
         for h in PIPELINE_COLUMNS:
-            want = norm(h, current[h].iat[i])
+            want = norm(h, current[col_of(h)].iat[i]) if col_of(h) in current.columns else ""
             if norm(h, cell(h)) != want:
                 out.cells[(n, col[h] + 1)] = want
         for h in custom:
@@ -164,7 +200,8 @@ def apply_plan(plan: Plan, current: pd.DataFrame, path=None) -> None:
     by_phone = {}
     for phone, fld, val in zip(stored["phone"], stored["field"], stored["value"]):
         by_phone.setdefault(phone, {})[fld] = val
-    keys = {sync_key(current["Téléphone"].iat[i], current["Nom"].iat[i], current["Notes"].iat[i]): i
+    uid = current["user_id"] if "user_id" in current.columns else pd.Series([None] * len(current))
+    keys = {sync_key(current["Téléphone"].iat[i], current["Nom"].iat[i], current["Notes"].iat[i], uid.iat[i]): i
             for i in reversed(range(len(current)))}
     con = _state(path)
     try:

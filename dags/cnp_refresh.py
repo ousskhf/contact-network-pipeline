@@ -47,6 +47,17 @@ with DAG(
     default_args={"retries": 1, "retry_delay": timedelta(minutes=5)},
     tags=["cnp"],
 ) as dag:
+    # Soft-fail: a source-system outage or a credential issue must not block the rest of the refresh --
+    # load_raw then falls back to yesterday's downline_raw.json. Skipped entirely against fixtures.
+    # CNP_NETWORK_PASSWORD is an Airflow Variable (masked in logs/UI because its key contains "password").
+    fetch_network = cnp_task(
+        "fetch_network",
+        "[ \"$CNP_DATA_DIR\" = fixtures ] || python -m ingest.fetch_network "
+        "|| echo 'WARNING: network fetch failed, reusing last downline_raw.json'",
+        CNP_NETWORK_API_BASE="{{ var.value.get('cnp_network_api_base', '') }}",
+        CNP_NETWORK_EMAIL="{{ var.value.get('cnp_network_email', '') }}",
+        CNP_NETWORK_PASSWORD="{{ var.value.get('cnp_network_password', '') }}",
+    )
     check_inputs = cnp_task(
         "check_inputs",
         "test -f $CNP_DATA_DIR/contacts.vcf || test -f $CNP_DATA_DIR/contacts.csv",
@@ -65,4 +76,4 @@ with DAG(
         CNP_EXPORT="data/contact_tracker.csv",
     )
 
-    check_inputs >> load_raw >> dbt_build >> sheet_sync >> export_tracker
+    fetch_network >> check_inputs >> load_raw >> dbt_build >> sheet_sync >> export_tracker

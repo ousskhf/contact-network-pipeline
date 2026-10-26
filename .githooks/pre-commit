@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+# Blocks a commit that introduces a real name/IP/email/secret-looking string, or any term from the
+# local, gitignored .sensitive-terms file (e.g. the real brand/company name). Generic and safe to
+# publish itself: the actual sensitive terms never live in this script, only in .sensitive-terms,
+# which git never tracks.
+#
+# Install once per clone:  make install-hooks   (sets git config core.hooksPath .githooks)
+# Bypass for a commit that's a false positive: git commit --no-verify
+set -euo pipefail
+
+diff() { git diff --cached -U0 --diff-filter=ACM -- . ':!*.lock' ':!*lock.json'; }
+added_lines() { diff | grep -E '^\+' | grep -Ev '^\+\+\+'; }
+staged_paths() { git diff --cached --name-only --diff-filter=ACMR; }
+branch_name() { git symbolic-ref --short HEAD 2>/dev/null || true; }
+
+fail=0
+report() { echo "pre-commit: $1" >&2; fail=1; }
+
+# 1. Terms from .sensitive-terms (gitignored, local only -- add the real brand name, family members'
+#    names, etc. here), checked against staged content, staged file PATHS (a filename or a branch
+#    name can leak a term just as easily as a line of code -- both have, previously, in this repo),
+#    and the current branch name. One term or regex per line; '#' starts a comment.
+terms_file="$(git rev-parse --show-toplevel)/.sensitive-terms"
+if [ -f "$terms_file" ]; then
+    while IFS= read -r term; do
+        term="${term%%#*}"; term="$(echo "$term" | xargs)"       # strip comments/whitespace
+        [ -z "$term" ] && continue
+        hit=$(added_lines | grep -inE "$term" || true)
+        if [ -n "$hit" ]; then
+            report "staged change matches a term in .sensitive-terms ('$term'):"
+            echo "$hit" | sed 's/^/    /' >&2
+        fi
+        hit=$(staged_paths | grep -inE "$term" || true)
+        if [ -n "$hit" ]; then
+            report "a staged file PATH matches a term in .sensitive-terms ('$term'):"
+            echo "$hit" | sed 's/^/    /' >&2
+        fi
+        hit=$(branch_name | grep -inE "$term" || true)
+        if [ -n "$hit" ]; then
+            report "the current branch name matches a term in .sensitive-terms ('$term'): $(branch_name)"
+        fi
+    done < "$terms_file"
+fi
+
+# 2. Generic patterns, regardless of .sensitive-terms: IPv4 addresses, and key/token/secret/password
+#    assignments that look like a real value rather than a placeholder/env-var reference.
+ipv4='\b([0-9]{1,3}\.){3}[0-9]{1,3}\b'
+hit=$(added_lines | grep -oE "$ipv4" | grep -vE '^(127\.0\.0\.1|0\.0\.0\.0|255\.255\.255\.255)$' || true)
+if [ -n "$hit" ]; then
+    report "staged change adds what looks like a real IP address:"
+    echo "$hit" | sort -u | sed 's/^/    /' >&2
+fi
+
+secret_assign='(key|token|secret|password)\s*[:=]\s*["'"'"'][^"'"'"']{6,}'
+hit=$(added_lines | grep -iE "$secret_assign" | grep -ivE '(os\.environ|getenv|process\.env|\$\{|var\.value|changeme|example|placeholder|xxx)' || true)
+if [ -n "$hit" ]; then
+    report "staged change looks like a hardcoded credential (expected an env var reference):"
+    echo "$hit" | sed 's/^/    /' >&2
+fi
+
+if [ "$fail" -ne 0 ]; then
+    echo "pre-commit: blocked. Fix the lines above, or 'git commit --no-verify' if this is a false positive." >&2
+    exit 1
+fi

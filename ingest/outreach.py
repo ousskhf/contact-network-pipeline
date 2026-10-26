@@ -107,11 +107,24 @@ def is_network_row(row) -> bool:
     return isinstance(note, str) and note.startswith(NETWORK_NOTE)
 
 
+def _network_suffix(row) -> str:
+    """user_id (the source system's stable member id) when the row has one, else the lowercased name as a fallback
+    (older stored rows, or a row built without it) -- user_id survives a retyped/recapitalised name,
+    name does not."""
+    uid = row.get("user_id")
+    if uid is not None and uid is not pd.NA and not (isinstance(uid, float) and pd.isna(uid)):
+        try:
+            return str(int(float(uid)))
+        except (TypeError, ValueError):
+            pass
+    return str(row.get("Nom") or "").strip().lower()
+
+
 def row_key(row) -> str:
-    """Key an entry is stored under: the phone, or phone#name for network-only members (members of the
-    network can share one phone, e.g. a sponsor's, so the phone alone would mix their entries up)."""
+    """Key an entry is stored under: the phone, or phone#<user_id> for network-only members (members of
+    the network can share one phone, e.g. a sponsor's, so the phone alone would mix their entries up)."""
     if is_network_row(row):
-        return f"{row.get('Téléphone')}#{str(row.get('Nom') or '').strip().lower()}"
+        return f"{row.get('Téléphone')}#{_network_suffix(row)}"
     return row.get("Téléphone")
 
 
@@ -175,6 +188,57 @@ def collect_changes(edited: pd.DataFrame, original: pd.DataFrame, current: pd.Da
             full.update(new)
             changes[phones.at[idx]] = full
     return changes
+
+
+def rekey_network_only_to_user_id(tracker: pd.DataFrame, path=None, apply: bool = False) -> dict:
+    """One-time migration: move a network-only member's stored rows from the old "phone#name" key to
+    "phone#user_id" now that user_id is available (stable across a retyped/recapitalised name, unlike
+    name). Safe by construction, same as rekey_linked_members: only moves a key that still identifies
+    the same tracker row under its new form, never overwrites a field the target already has, and
+    deletes the old rows only once every field is copied. With apply=False nothing is written.
+    `tracker` is the tracker_export frame (not overlaid), with a "user_id" column."""
+    path = path or default_path()
+    if not Path(path).exists():
+        return {"moved": 0, "unchanged": 0, "conflicts": 0, "no_user_id": 0}
+    by_old_key: dict[str, str] = {}
+    for row in tracker.to_dict("records"):
+        if not is_network_row(row):
+            continue
+        name_key = f"{row.get('Téléphone')}#{str(row.get('Nom') or '').strip().lower()}"
+        new_key = row_key(row)
+        if new_key != name_key:
+            by_old_key[name_key] = new_key
+    stats = {"moved": 0, "unchanged": 0, "conflicts": 0, "no_user_id": 0}
+    con = duckdb.connect(path, read_only=not apply)
+    try:
+        con.execute("begin")
+        for table in ("outreach", "sheet_base", "sheet_extra"):
+            if not con.execute("select count(*) from information_schema.tables where table_name = ?", [table]).fetchone()[0]:
+                continue
+            for (old_key,) in con.execute(f"select distinct phone from {table} where phone like '%#%'").fetchall():
+                new_key = by_old_key.get(old_key)
+                if new_key is None:
+                    stats["no_user_id"] += 1
+                    continue
+                old = con.execute(f"select field, value from {table} where phone = ?", [old_key]).fetchall()
+                have = dict(con.execute(f"select field, value from {table} where phone = ?", [new_key]).fetchall())
+                if any(f in have and have[f] != v for f, v in old):
+                    stats["conflicts"] += 1
+                    continue
+                if table == "outreach":
+                    stats["moved"] += 1
+                if apply:
+                    con.executemany(f"insert into {table} select ?, ?, ? where not exists "
+                                    f"(select 1 from {table} where phone = ? and field = ?)",
+                                    [(new_key, f, v, new_key, f) for f, v in old])
+                    con.execute(f"delete from {table} where phone = ?", [old_key])
+        con.execute("commit" if apply else "rollback")
+    except Exception:
+        con.execute("rollback")
+        raise
+    finally:
+        con.close()
+    return stats
 
 
 def rekey_linked_members(tracker: pd.DataFrame, path=None, apply: bool = False) -> dict:

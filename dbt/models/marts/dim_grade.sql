@@ -9,6 +9,14 @@ select
     min_vente_perso,
     director_min_ca,
     required_confirmed_directors,
+    same_rank_earning_threshold,
+    group_bonus_rate,
+    personal_discount,
+    pd_activation_value,
+    personal_discount_less,
+    pd_activation_value_less,
+    sponsor_bonus_rate,
+    guest_commission_rate,
     lead(name) over w as next_grade,
     nullif(lead(objective) over w, 0) as next_objective
 from {{ source('raw', 'grades') }}

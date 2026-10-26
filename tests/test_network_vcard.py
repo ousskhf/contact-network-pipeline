@@ -8,7 +8,7 @@ COLS = ["Nom", "Téléphone", "Téléphone 2", "Téléphone 3", "Autres numéros
 
 def _members(rows):
     return pd.DataFrame(rows, columns=["user_id", "sponsor_id", "name", "grade", "is_active", "person_id",
-                                       "phone_norm", "phone2_norm"])
+                                       "link_kind", "phone_norm", "phone2_norm"])
 
 
 def _wide(rows):
@@ -53,11 +53,11 @@ def test_to_vcard_one_card_per_person():
 
 def test_default_includes_everyone_not_in_contacts_and_status_filters_narrow_it():
     members = _members([
-        [1, None, "new blank", "Ambassadeur", True, None, "20000001", None],
-        [2, 1, "new relancer", "Ambassadeur", True, None, "20000002", None],
-        [3, 1, "new converti", "Ambassadeur", True, None, "20000003", None],
-        [4, 1, "in contacts", "Ambassadeur", True, 7, "20000004", None],
-        [5, 1, "archived", "Ambassadeur", True, None, "20000005", None]])
+        [1, None, "new blank", "Ambassadeur", True, None, None, "20000001", None],
+        [2, 1, "new relancer", "Ambassadeur", True, None, None, "20000002", None],
+        [3, 1, "new converti", "Ambassadeur", True, None, None, "20000003", None],
+        [4, 1, "in contacts", "Ambassadeur", True, 7, "name_match", "20000004", None],
+        [5, 1, "archived", "Ambassadeur", True, None, None, "20000005", None]])
     wide = _wide([
         ["new blank", "20000001", None, None, None, "", "Importé du réseau (membre)"],
         ["new relancer", "20000002", None, None, None, "À relancer", "Importé du réseau (membre)"],
@@ -72,10 +72,10 @@ def test_default_includes_everyone_not_in_contacts_and_status_filters_narrow_it(
 
 def test_filters_activity_grade_branch_and_linked_members():
     members = _members([
-        [1, None, "top", "Directeur", True, None, "20000001", None],
-        [2, 1, "child", "Ambassadeur", False, None, "20000002", None],
-        [3, 2, "grandchild", "Ambassadeur", True, None, "20000003", None],
-        [4, 1, "linked", "Ambassadeur", True, 9, "20000004", None]])
+        [1, None, "top", "Directeur", True, None, None, "20000001", None],
+        [2, 1, "child", "Ambassadeur", False, None, None, "20000002", None],
+        [3, 2, "grandchild", "Ambassadeur", True, None, None, "20000003", None],
+        [4, 1, "linked", "Ambassadeur", True, 9, "name_match", "20000004", None]])
     wide = _wide([["linked", "20000004", None, None, None, "À relancer", None]])
     assert list(network_export(members, wide, active="inactifs")[0]["nom"]) == ["child"]
     assert list(network_export(members, wide, grades=["Directeur"])[0]["nom"]) == ["top"]
@@ -84,10 +84,20 @@ def test_filters_activity_grade_branch_and_linked_members():
     assert list(out["nom"]) == ["linked"]                      # status found through the contact's number
 
 
+def test_same_number_link_is_offered_but_a_real_name_match_is_not():
+    """A member merely sharing a phone with someone else's contact (link_kind='same_number') is not
+    that contact and should still be offered, under their own name; a true name match is not."""
+    members = _members([
+        [1, None, "shares a number only", "Ambassadeur", True, 5, "same_number", "20000001", None],
+        [2, None, "really is a contact", "Ambassadeur", True, 6, "name_match", "20000002", None]])
+    out = network_export(members, _wide([]))[0]
+    assert list(out["nom"]) == ["shares a number only"]
+
+
 def test_members_without_a_number_are_counted_not_exported_and_phone2_is_a_fallback():
     members = _members([
-        [1, None, "no phone", "Ambassadeur", True, None, None, None],
-        [2, 1, "second", "Ambassadeur", True, None, None, "20000002"]])
+        [1, None, "no phone", "Ambassadeur", True, None, None, None, None],
+        [2, 1, "second", "Ambassadeur", True, None, None, None, "20000002"]])
     out, skipped = network_export(members, _wide([]))
     assert list(out["nom"]) == ["second"] and out.loc[0, "téléphone"] == "20000002" and skipped == 1
 
