@@ -12,6 +12,7 @@ x-app: &app
     - CNP_EXPORT=${CNP_EXPORT:-data/contact_tracker.csv}
     - CNP_OUTREACH=${CNP_OUTREACH:-data/outreach.duckdb}
     - CNP_SHEET_ID=${CNP_SHEET_ID:-}
+    - ORG_NAME=${ORG_NAME:-}
     - CNP_GOOGLE_CREDENTIALS=${CNP_GOOGLE_CREDENTIALS:-data/google-service-account.json}
     - HOME=/tmp
 

@@ -177,6 +177,14 @@ def network_nodes(con):
         "from main.fct_network_membership f join main.stg_network s using (member_row)").df()
 
 
+def network_members(con):
+    """Every network member with the numbers and the contact link used to export them to a phone."""
+    return con.execute(
+        "select f.user_id, f.sponsor_id, f.name, f.grade, f.is_active, f.person_id, "
+        "s.phone_norm, s.phone2_norm "
+        "from main.fct_network_membership f join main.stg_network s using (member_row) order by f.member_row").df()
+
+
 def birthdays_source(con):
     return con.execute(
         "select f.name as nom, s.phone_norm as téléphone, f.grade, f.birth_date "
@@ -293,3 +301,52 @@ def inactive_by_impact(nodes, phones):
                                       "ventes équipe", "whatsapp"])
     out = out[(out["personnes dans sa branche"] > 0) | (out["ventes équipe"] > 0)]
     return out.sort_values(["personnes dans sa branche", "ventes équipe"], ascending=False).reset_index(drop=True)
+
+
+ALL_STATUSES = tuple(outreach.STATUTS)     # default export filter: everyone; no stored status counts as "À contacter"
+
+
+def _status_lookup(wide) -> dict:
+    """number key -> status, for the tracker rows (a network-only member is keyed by phone#name)."""
+    out = {}
+    for row in wide.to_dict("records"):
+        status = row.get("Statut")
+        status = status if isinstance(status, str) and status else "À contacter"
+        for n in outreach.numbers(row):
+            out.setdefault(n, status)
+    return out
+
+
+def network_export(members, wide, statuses=ALL_STATUSES, only_new=True, active="tous", grades=None, user_ids=None):
+    """Network members to add to a phone. Returns (people, n_without_number).
+
+    people: DataFrame nom, téléphone, grade, actif, statut. `wide` must hold every tracker row,
+    archived ones included, so an archived person is found and filtered out by status.
+    only_new: leave out members already in the phone contacts (linked to a contact by number).
+    active: "tous", "actifs" or "inactifs". grades / user_ids: keep only these (None = no filter)."""
+    lookup = _status_lookup(wide)
+    rows, no_number = [], 0
+    for m in members.itertuples():
+        if only_new and pd.notna(m.person_id):
+            continue
+        if active != "tous" and bool(m.is_active) != (active == "actifs"):
+            continue
+        grade = m.grade if isinstance(m.grade, str) else "Inconnu"
+        if grades is not None and grade not in grades:
+            continue
+        if user_ids is not None and not (pd.notna(m.user_id) and int(m.user_id) in user_ids):
+            continue
+        phone = next((p for p in (m.phone_norm, m.phone2_norm) if isinstance(p, str) and p), None)
+        name = str(m.name or "").strip()
+        keys = [f"{p}#{name.lower()}" for p in (m.phone_norm, m.phone2_norm) if isinstance(p, str) and p]
+        keys += [p for p in (m.phone_norm, m.phone2_norm) if isinstance(p, str) and p]
+        status = next((lookup[k] for k in keys if k in lookup), "À contacter")
+        if status not in statuses:
+            continue
+        if phone is None or not name:
+            no_number += 1
+            continue
+        rows.append({"nom": name, "téléphone": phone, "grade": grade,
+                     "actif": "actif" if m.is_active else "inactif", "statut": status})
+    cols = ["nom", "téléphone", "grade", "actif", "statut"]
+    return pd.DataFrame(rows, columns=cols), no_number

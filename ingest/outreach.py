@@ -175,3 +175,61 @@ def collect_changes(edited: pd.DataFrame, original: pd.DataFrame, current: pd.Da
             full.update(new)
             changes[phones.at[idx]] = full
     return changes
+
+
+def rekey_linked_members(tracker: pd.DataFrame, path=None, apply: bool = False) -> dict:
+    """Move entries stored under "phone#name" (a network-only member) to the phone key of the contact
+    that member has since become, so a member added to the phone contacts keeps their status and notes.
+
+    Safe by construction: an entry is moved only when exactly one contact row matches (a shared phone is
+    disambiguated by name), a field the contact already has is never overwritten, and the old rows are
+    deleted only once every one of their fields is copied. Anything else is left and counted.
+    With apply=False nothing is written. `tracker` is the tracker_export frame (not overlaid)."""
+    path = path or default_path()
+    if not Path(path).exists():
+        return {"moved": 0, "ambiguous": 0, "conflicts": 0, "still_network": 0}
+    rows = tracker.to_dict("records")
+    live = {row_key(r) for r in rows if is_network_row(r)}
+    by_number: dict[str, list[dict]] = {}
+    for r in rows:
+        if not is_network_row(r):
+            for n in numbers(r):
+                by_number.setdefault(n, []).append(r)
+    stats = {"moved": 0, "ambiguous": 0, "conflicts": 0, "still_network": 0}
+    con = duckdb.connect(path, read_only=not apply)
+    try:
+        con.execute("begin")
+        for table in ("outreach", "sheet_base", "sheet_extra"):
+            if not con.execute("select count(*) from information_schema.tables where table_name = ?", [table]).fetchone()[0]:
+                continue
+            for (key,) in con.execute(f"select distinct phone from {table} where phone like '%#%'").fetchall():
+                if key in live:
+                    stats["still_network"] += 1
+                    continue
+                number, _, name = key.partition("#")
+                found = by_number.get(number, [])
+                if len(found) > 1:
+                    found = [r for r in found if str(r.get("Nom") or "").strip().lower() == name]
+                if len(found) != 1:
+                    stats["ambiguous"] += 1
+                    continue
+                target = found[0].get("Téléphone")
+                old = con.execute(f"select field, value from {table} where phone = ?", [key]).fetchall()
+                have = dict(con.execute(f"select field, value from {table} where phone = ?", [target]).fetchall())
+                if any(f in have and have[f] != v for f, v in old):
+                    stats["conflicts"] += 1
+                    continue
+                if table == "outreach":
+                    stats["moved"] += 1
+                if apply:
+                    con.executemany(f"insert into {table} select ?, ?, ? where not exists "
+                                    f"(select 1 from {table} where phone = ? and field = ?)",
+                                    [(target, f, v, target, f) for f, v in old])
+                    con.execute(f"delete from {table} where phone = ?", [key])
+        con.execute("commit" if apply else "rollback")
+    except Exception:
+        con.execute("rollback")
+        raise
+    finally:
+        con.close()
+    return stats
