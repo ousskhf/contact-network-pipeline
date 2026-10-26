@@ -92,6 +92,10 @@ if __name__ == "__main__":
     rows[2]["Address 1 - Country"], rows[2]["Address 1 - Street"] = "Tunisie", "12 Rue Demo"
     rows[12]["Last Name"], rows[12]["Address 1 - Street"] = "FreeText", "Tunis, Tunisia"   # whole address in the street field
     rows[13]["Last Name"], rows[13]["Address 1 - Street"] = "CountryOnly", "Tunisia"
+    for i, r in enumerate(rows[14:34]):                                          # spread over a few governorates, for the map
+        r["Address 1 - Region"] = ["Tunis", "Tunis", "Tunis", "Sfax", "Sfax", "Sousse", "Nabeul", "Gabès", "Ariana"][i % 9]
+    rows[34]["Address 1 - City"] = "Hammamet"                                     # a ville only: the région is deduced
+    rows[35]["Address 1 - Region"], rows[35]["Address 1 - Country"] = "Paris", "France"
     rows[0]["E-mail 1 - Value"] = "amal@example.test"
     rows[0]["Organization Name"], rows[0]["Organization Title"] = "Atelier Demo", "Gérante"
     rows[1]["E-mail 1 - Value"] = "amal@example.test"                      # same person (shares number), same email

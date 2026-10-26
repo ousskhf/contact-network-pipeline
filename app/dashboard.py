@@ -13,6 +13,7 @@ import streamlit.components.v1 as components
 # `streamlit run app/dashboard.py` only puts app/ on the path, so add the repo root.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from app import carte
 from app.network_tree import (ancestors, descendant_counts, echarts_html, echarts_tree, grade_colors, index_tree,
                               subtree, treemap_data)
 from app.queries import (ALL_STATUSES, METRICS, archived_person_ids, birthdays_source, campaign, connect, due_followups, grade_health,
@@ -75,9 +76,9 @@ def csv_button(label, df, name):
     st.download_button(label, df.to_csv(index=False).encode("utf-8"), file_name=name, mime="text/csv")
 
 
-tab_todo, tab_over, tab_net, tab_tree, tab_prog, tab_bday, tab_pros, tab_follow, tab_route = st.tabs(
+tab_todo, tab_over, tab_net, tab_tree, tab_prog, tab_bday, tab_pros, tab_follow, tab_map, tab_route = st.tabs(
     ["À faire", "Vue d'ensemble", "Réseau", "Arbre du réseau", "Progression", "Anniversaires", "Prospects", "Suivi",
-     "Trajets"])
+     "Carte", "Trajets"])
 
 WA = {"whatsapp": st.column_config.LinkColumn("whatsapp", display_text="Écrire")}
 
@@ -361,6 +362,63 @@ with tab_follow:
 def follow_short_link(url):
     return resolve_short_link(url)
 
+
+with tab_map:
+    group = st.radio("Afficher", ["Tout le monde", "Membres du réseau", "Prospects"], horizontal=True, key="map_group")
+    in_group = {"Tout le monde": pd.Series(True, index=wide.index), "Membres du réseau": wide["Grade"].notna(),
+                "Prospects": wide["Grade"].isna()}[group]
+    folk = wide[in_group][["Nom", "Téléphone", "Grade", "Statut", "Pays", "Région", "Ville"]]
+    regions = carte.by_region(folk)
+    abroad = int(folk["Pays"].map(carte.is_abroad).sum())
+    m = st.columns(3)
+    m[0].metric("Sur la carte", f"{int(regions['Personnes'].sum())}/{len(folk)}")
+    m[1].metric("Régions représentées", len(regions))
+    m[2].metric("À l'étranger", abroad)
+    st.caption("Chaque cercle est le centre d'une région (gouvernorat), pas une adresse : on compte les personnes, "
+               "on ne montre aucun domicile. La région vient de la colonne Région du Sheet, à défaut de la Ville.")
+
+    if regions.empty:
+        st.info("Personne n'a encore de région ou de ville reconnue. Elles se saisissent dans le Sheet "
+                "(colonnes Région, Ville), puis `make sync`.")
+    else:
+        top = float(regions["Personnes"].max())
+        fig = go.Figure(go.Scattergeo(
+            lat=regions["lat"], lon=regions["lon"], mode="markers+text", text=regions["Personnes"].astype(str),
+            customdata=regions["Région"], hovertemplate="%{customdata}: %{text} personne(s)<extra></extra>",
+            marker=dict(size=14 + 40 * (regions["Personnes"] / top) ** 0.5, color="#2a7ab9", opacity=0.75,
+                        line=dict(width=1, color="white")),
+            textfont=dict(color="white", size=11)))
+        fig.update_geos(lonaxis_range=[7.3, 11.9], lataxis_range=[30.1, 37.6], resolution=50, showcountries=True,
+                        showland=True, landcolor="rgba(128,128,128,0.15)", showocean=False, showframe=False,
+                        bgcolor="rgba(0,0,0,0)")
+        fig.update_layout(height=620, margin=dict(l=0, r=0, t=0, b=0), paper_bgcolor="rgba(0,0,0,0)")
+        st.plotly_chart(fig, width="stretch")
+
+        left, right = st.columns(2)
+        left.subheader("Par région")
+        left.dataframe(regions[["Région", "Personnes"]], hide_index=True, width="stretch")
+        right.subheader("Par ville")
+        villes = carte.by_ville(folk)
+        if villes.empty:
+            right.caption("Aucune ville saisie.")
+        else:
+            right.dataframe(villes, hide_index=True, width="stretch")
+
+    if abroad:
+        st.subheader("Pays")
+        st.dataframe(carte.countries(folk), hide_index=True, width="stretch")
+
+    todo_place = carte.unplaced(folk)
+    st.subheader(f"À localiser ({len(todo_place)})")
+    st.caption("Personnes sans région reconnue, hors étranger. « Texte non reconnu » : une région ou une ville est "
+               "saisie mais ne correspond à aucun gouvernorat connu (ex. « Sahel ») ; à corriger dans le Sheet.")
+    if todo_place.empty:
+        st.caption("Tout le monde est localisé.")
+    else:
+        shown_cols = ["Nom", "Téléphone", "Grade", "Statut", "Région", "Ville", "Raison"]
+        st.dataframe(todo_place[shown_cols].sort_values(["Raison", "Nom"], ascending=[False, True]),
+                     hide_index=True, width="stretch", height=320)
+        csv_button("Télécharger (CSV)", todo_place[shown_cols], "a_localiser.csv")
 
 with tab_route:
     st.caption("Choisis les personnes à visiter : un lien Google Maps s'ouvre sur le téléphone avec le trajet, "
