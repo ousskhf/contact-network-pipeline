@@ -25,7 +25,7 @@ def test_new_tabs_show_network_health_and_prospects(db, monkeypatch, tmp_path):
     assert metrics["Inactifs à relancer"] == "3"                  # fixtures: members 0, 4, 8 are blocked
     assert metrics["Prospects (contacts hors réseau)"] == "40"    # 41 people, 1 of them is a network member
     assert metrics["Déjà dans le réseau"] == "1"
-    assert [t.label for t in at.tabs] == ["À faire", "Vue d'ensemble", "Réseau", "Arbre du réseau", "Progression", "Anniversaires", "Prospects", "Suivi", "Trajets"]
+    assert [t.label for t in at.tabs] == ["À faire", "Vue d'ensemble", "Réseau", "Arbre du réseau", "Progression", "Anniversaires", "Prospects", "Suivi", "Carte", "Trajets"]
 
 
 def test_overview_lists_shared_numbers_to_check(db, monkeypatch, tmp_path):
