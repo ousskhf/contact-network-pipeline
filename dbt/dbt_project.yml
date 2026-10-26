@@ -4,6 +4,7 @@ profile: cnp
 model-paths: ["models"]
 macro-paths: ["macros"]
 test-paths: ["tests"]
+snapshot-paths: ["snapshots"]
 target-path: "target"
 log-path: "logs"
 models:

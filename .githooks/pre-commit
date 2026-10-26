@@ -51,8 +51,11 @@ if [ -n "$hit" ]; then
     echo "$hit" | sort -u | sed 's/^/    /' >&2
 fi
 
-secret_assign='(key|token|secret|password)\s*[:=]\s*["'"'"'][^"'"'"']{6,}'
-hit=$(added_lines | grep -iE "$secret_assign" | grep -ivE '(os\.environ|getenv|process\.env|\$\{|var\.value|changeme|example|placeholder|xxx)' || true)
+# bare "key" is too common a non-secret identifier (a UI widget's key=, dbt's unique_key=, a dict
+# key) to include on its own; api_key/secret_key/access_key/private_key etc. still match via the
+# word boundary before "key".
+secret_assign='([a-z_]*(api|secret|access|private)_?key|token|secret|password)\s*[:=]\s*["'"'"'][^"'"'"']{6,}'
+hit=$(added_lines | grep -iE "$secret_assign" | grep -ivE '(os\.environ|getenv|process\.env|\$\{|var\.value|changeme|example|placeholder|xxx|unique_key|^\+\s*key\s*=)' || true)
 if [ -n "$hit" ]; then
     report "staged change looks like a hardcoded credential (expected an env var reference):"
     echo "$hit" | sed 's/^/    /' >&2

@@ -18,8 +18,9 @@ from app.network_tree import (ancestors, descendant_counts, echarts_html, echart
                               subtree, treemap_data)
 from app.queries import (ALL_STATUSES, METRICS, archived_person_ids, birthdays_source, campaign, connect, due_followups, grade_health,
                          grade_ladder, inactive_by_impact, inactive_members, invalid_numbers, merge_conflicts, merge_report,
-                         near_promotion, network_by_grade, network_export, network_members, network_nodes, network_phones, progress_vs_objective,
-                         progression, same_number_links, quality_from_rows, summary, tracker, unscheduled_interested, upcoming_birthdays)
+                         near_promotion, network_by_grade, network_export, network_history, network_members, network_nodes, network_phones,
+                         progress_vs_objective, progression, same_number_links, quality_from_rows, summary, tracker, unscheduled_interested,
+                         upcoming_birthdays)
 from app.trajets import make_stop, resolve_short_link, route_links
 from ingest import outreach
 from ingest.vcard import to_vcard
@@ -61,6 +62,7 @@ try:
     conflicts, by_number = merge_conflicts(con, gone), same_number_links(con, gone)
     cam, ladder, prog, born = campaign(con), grade_ladder(con), progression(con), birthdays_source(con)
     nodes, phones, members = network_nodes(con), network_phones(con), network_members(con)
+    hist = network_history(con)
 finally:
     con.close()          # never hold the DuckDB file: the pipeline needs to write to it
 
@@ -76,9 +78,9 @@ def csv_button(label, df, name):
     st.download_button(label, df.to_csv(index=False).encode("utf-8"), file_name=name, mime="text/csv")
 
 
-tab_todo, tab_over, tab_net, tab_tree, tab_prog, tab_bday, tab_pros, tab_follow, tab_map, tab_route = st.tabs(
-    ["À faire", "Vue d'ensemble", "Réseau", "Arbre du réseau", "Progression", "Anniversaires", "Prospects", "Suivi",
-     "Carte", "Trajets"])
+tab_todo, tab_over, tab_net, tab_tree, tab_prog, tab_hist, tab_bday, tab_pros, tab_follow, tab_map, tab_route = st.tabs(
+    ["À faire", "Vue d'ensemble", "Réseau", "Arbre du réseau", "Progression", "Historique", "Anniversaires",
+     "Prospects", "Suivi", "Carte", "Trajets"])
 
 WA = {"whatsapp": st.column_config.LinkColumn("whatsapp", display_text="Écrire")}
 
@@ -283,6 +285,37 @@ with tab_prog:
                                                 "direct_count": "directs", "sponsor_name": "sponsor"})
         st.dataframe(pv_view, hide_index=True, width="stretch")
         csv_button("Télécharger (CSV)", pv_view, "progression.csv")
+
+with tab_hist:
+    if hist.empty:
+        st.caption("Pas encore d'historique : il se construit nuit après nuit à partir d'aujourd'hui "
+                   "(les états précédents n'ont pas été conservés). Relancer le pipeline pour commencer.")
+    else:
+        st.caption("Chaque point correspond à un changement réel (vente, grade, activité...), pas à chaque "
+                   "nuit : avec un seul jour de données pour l'instant, les courbes n'auront qu'un point "
+                   "jusqu'à la prochaine exécution du pipeline.")
+        h_metric = st.selectbox("Mesure", list(METRICS), index=1, key="hist_metric")
+        done, pending = METRICS[h_metric]
+        h = hist.copy()
+        h["valeur"] = h[done].fillna(0) + h[pending].fillna(0)
+        h["date"] = pd.to_datetime(h["valide_du"]).dt.date
+
+        st.subheader("Réseau entier")
+        # Total as of each date: each member's most recent value at or before that date, carried
+        # forward -- not a sum of that day's rows, which would double-count a member who changed
+        # twice in one day and wrongly show the total dropping on a day nobody else changed.
+        pivot = h.sort_values("date").pivot_table(index="date", columns="user_id", values="valeur", aggfunc="last")
+        pivot = pivot.reindex(sorted(h["date"].unique())).ffill()
+        total = pivot.sum(axis=1)
+        if len(total) < 2:
+            st.caption("Un seul point pour l'instant.")
+        st.line_chart(total)
+
+        st.subheader("Un membre")
+        who = st.selectbox("Membre", sorted(hist["nom"].dropna().unique()), key="hist_who")
+        mh = h[h["nom"] == who].sort_values("date")
+        st.line_chart(mh.set_index("date")["valeur"])
+        st.dataframe(mh[["date", "grade", "valeur"]], hide_index=True, width="stretch")
 
 with tab_bday:
     if born.empty:

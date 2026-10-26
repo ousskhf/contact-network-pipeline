@@ -192,6 +192,39 @@ def progression(con):
         "from main.fct_network_membership f join main.stg_network s using (member_row)").df()
 
 
+HISTORY_COLUMNS = ["user_id", "nom", "grade", "is_active", "direct_count",
+                   "personal_sales_ttc", "pending_personal_sales_ttc",
+                   "personal_sales_ht", "pending_personal_sales_ht",
+                   "personal_sales_net", "pending_personal_sales_net",
+                   "team_sales_ttc", "pending_team_sales_ttc",
+                   "team_sales_ht", "pending_team_sales_ht",
+                   "team_sales_net", "pending_team_sales_net",
+                   "downline_sales_ttc", "pending_downline_sales_ttc",
+                   "downline_sales_ht", "pending_downline_sales_ht",
+                   "downline_sales_net", "pending_downline_sales_net",
+                   "parainage_sales_ttc", "pending_parainage_sales_ttc",
+                   "parainage_sales_ht", "pending_parainage_sales_ht",
+                   "parainage_sales_net", "pending_parainage_sales_net",
+                   "valide_du", "valide_au"]
+
+
+def network_history(con):
+    """Every state a network member has ever had (one row per change), oldest first. Empty until
+    the pipeline has run with this feature at least once -- see fct_network_history."""
+    return _optional(
+        con, "select user_id, name as nom, grade, is_active, direct_count, "
+             "personal_sales_ttc, pending_personal_sales_ttc, "
+             "personal_sales_ht, pending_personal_sales_ht, personal_sales_net, pending_personal_sales_net, "
+             "team_sales_ttc, pending_team_sales_ttc, "
+             "team_sales_ht, pending_team_sales_ht, team_sales_net, pending_team_sales_net, "
+             "downline_sales_ttc, pending_downline_sales_ttc, "
+             "downline_sales_ht, pending_downline_sales_ht, downline_sales_net, pending_downline_sales_net, "
+             "parainage_sales_ttc, pending_parainage_sales_ttc, "
+             "parainage_sales_ht, pending_parainage_sales_ht, parainage_sales_net, pending_parainage_sales_net, "
+             "valide_du, valide_au "
+             "from main.fct_network_history order by valide_du", [], HISTORY_COLUMNS)
+
+
 def network_nodes(con):
     return con.execute(
         "select f.user_id, f.sponsor_id, f.name, f.grade, f.grade_order, f.is_active, "
