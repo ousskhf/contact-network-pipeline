@@ -15,11 +15,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app.network_tree import (ancestors, descendant_counts, echarts_html, echarts_tree, grade_colors, index_tree,
                               subtree, treemap_data)
-from app.queries import (METRICS, archived_person_ids, birthdays_source, campaign, connect, due_followups, grade_health,
+from app.queries import (ALL_STATUSES, METRICS, archived_person_ids, birthdays_source, campaign, connect, due_followups, grade_health,
                          grade_ladder, inactive_by_impact, inactive_members, invalid_numbers, merge_conflicts, merge_report,
-                         near_promotion, network_by_grade, network_nodes, network_phones, progress_vs_objective,
-                         progression, quality_from_rows, same_number_links, summary, tracker, unscheduled_interested, upcoming_birthdays)
+                         near_promotion, network_by_grade, network_export, network_members, network_nodes, network_phones, progress_vs_objective,
+                         progression, same_number_links, quality_from_rows, summary, tracker, unscheduled_interested, upcoming_birthdays)
 from ingest import outreach
+from ingest.vcard import to_vcard
 
 st.set_page_config(page_title="Contacts & réseau", layout="wide")
 st.title("Contacts & réseau")
@@ -57,7 +58,7 @@ try:
     health, inactive = grade_health(con), inactive_members(con)
     conflicts, by_number = merge_conflicts(con, gone), same_number_links(con, gone)
     cam, ladder, prog, born = campaign(con), grade_ladder(con), progression(con), birthdays_source(con)
-    nodes, phones = network_nodes(con), network_phones(con)
+    nodes, phones, members = network_nodes(con), network_phones(con), network_members(con)
 finally:
     con.close()          # never hold the DuckDB file: the pipeline needs to write to it
 
@@ -163,7 +164,6 @@ with tab_over:
     else:
         st.dataframe(by_number, hide_index=True, width="stretch")
 
-
 with tab_net:
     total, n_inactive = int(health["total"].sum()), len(inactive)
     c = st.columns(3)
@@ -180,6 +180,35 @@ with tab_net:
         st.subheader("Membres inactifs à relancer")
         st.dataframe(inactive, hide_index=True, width="stretch")
         csv_button("Télécharger la liste (CSV)", inactive, "inactifs.csv")
+
+        st.subheader("Ajouter des membres aux contacts du téléphone")
+        st.caption("Choisir qui ajouter, puis télécharger le fichier .vcf et l'ouvrir sur le téléphone "
+                   "(Android : Contacts, Importer). Chaque fiche contient le nom et le numéro, et l'entreprise si elle est "
+                   "définie. Sans statut saisi, un membre compte comme « À contacter » (filtre Statut).")
+        f = st.columns(4)
+        f_status = f[0].multiselect("Statut", outreach.STATUTS, default=list(ALL_STATUSES), key="vc_status")
+        f_new = f[1].checkbox("Pas déjà dans mes contacts", value=True, key="vc_new")
+        f_active = f[2].selectbox("Activité", ["tous", "actifs", "inactifs"], key="vc_active")
+        f_grades = f[3].multiselect("Grade", sorted(members["grade"].dropna().unique()), key="vc_grades",
+                                    placeholder="Tous les grades")
+        keys_m, _, children_m, order_m = index_tree(nodes)
+        desc_m = descendant_counts(children_m, order_m)
+        branches = sorted((k for k in keys_m if desc_m[k] > 0), key=lambda k: -desc_m[k])
+        f_branch = st.selectbox("Branche", [None] + branches, key="vc_branch",
+                                format_func=lambda k: "Tout le réseau" if k is None
+                                else f"{keys_m[k].name} — {desc_m[k]} sous lui")
+        ids = None if f_branch is None else {int(u) for u in subtree(nodes, int(f_branch))["user_id"].dropna()}
+        picked, no_number = network_export(members, wide_all, tuple(f_status), f_new, f_active,
+                                           f_grades or None, ids)
+        st.metric("Membres à ajouter", len(picked))
+        if no_number:
+            st.caption(f"{no_number} membre(s) sans numéro de téléphone exploitable, non inclus.")
+        if picked.empty:
+            st.caption("Aucun membre ne correspond à ces filtres.")
+        else:
+            st.dataframe(picked, hide_index=True, width="stretch")
+            st.download_button("Télécharger les contacts (.vcf)", to_vcard(picked.to_dict("records")).encode("utf-8"),
+                               file_name="reseau.vcf", mime="text/vcard")
 
 with tab_tree:
     if nodes.empty:
