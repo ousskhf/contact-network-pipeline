@@ -10,12 +10,16 @@ set -euo pipefail
 
 diff() { git diff --cached -U0 --diff-filter=ACM -- . ':!*.lock' ':!*lock.json'; }
 added_lines() { diff | grep -E '^\+' | grep -Ev '^\+\+\+'; }
+staged_paths() { git diff --cached --name-only --diff-filter=ACMR; }
+branch_name() { git symbolic-ref --short HEAD 2>/dev/null || true; }
 
 fail=0
 report() { echo "pre-commit: $1" >&2; fail=1; }
 
 # 1. Terms from .sensitive-terms (gitignored, local only -- add the real brand name, family members'
-#    names, etc. here). One term or regex per line; '#' starts a comment.
+#    names, etc. here), checked against staged content, staged file PATHS (a filename or a branch
+#    name can leak a term just as easily as a line of code -- both have, previously, in this repo),
+#    and the current branch name. One term or regex per line; '#' starts a comment.
 terms_file="$(git rev-parse --show-toplevel)/.sensitive-terms"
 if [ -f "$terms_file" ]; then
     while IFS= read -r term; do
@@ -25,6 +29,15 @@ if [ -f "$terms_file" ]; then
         if [ -n "$hit" ]; then
             report "staged change matches a term in .sensitive-terms ('$term'):"
             echo "$hit" | sed 's/^/    /' >&2
+        fi
+        hit=$(staged_paths | grep -inE "$term" || true)
+        if [ -n "$hit" ]; then
+            report "a staged file PATH matches a term in .sensitive-terms ('$term'):"
+            echo "$hit" | sed 's/^/    /' >&2
+        fi
+        hit=$(branch_name | grep -inE "$term" || true)
+        if [ -n "$hit" ]; then
+            report "the current branch name matches a term in .sensitive-terms ('$term'): $(branch_name)"
         fi
     done < "$terms_file"
 fi
