@@ -19,6 +19,7 @@ from app.queries import (ALL_STATUSES, METRICS, archived_person_ids, birthdays_s
                          grade_ladder, inactive_by_impact, inactive_members, invalid_numbers, merge_conflicts, merge_report,
                          near_promotion, network_by_grade, network_export, network_members, network_nodes, network_phones, progress_vs_objective,
                          progression, same_number_links, quality_from_rows, summary, tracker, unscheduled_interested, upcoming_birthdays)
+from app.trajets import make_stop, resolve_short_link, route_links
 from ingest import outreach
 from ingest.vcard import to_vcard
 
@@ -74,8 +75,9 @@ def csv_button(label, df, name):
     st.download_button(label, df.to_csv(index=False).encode("utf-8"), file_name=name, mime="text/csv")
 
 
-tab_todo, tab_over, tab_net, tab_tree, tab_prog, tab_bday, tab_pros, tab_follow = st.tabs(
-    ["À faire", "Vue d'ensemble", "Réseau", "Arbre du réseau", "Progression", "Anniversaires", "Prospects", "Suivi"])
+tab_todo, tab_over, tab_net, tab_tree, tab_prog, tab_bday, tab_pros, tab_follow, tab_route = st.tabs(
+    ["À faire", "Vue d'ensemble", "Réseau", "Arbre du réseau", "Progression", "Anniversaires", "Prospects", "Suivi",
+     "Trajets"])
 
 WA = {"whatsapp": st.column_config.LinkColumn("whatsapp", display_text="Écrire")}
 
@@ -353,3 +355,73 @@ with tab_follow:
             st.rerun()
         else:
             st.info("Aucune modification.")
+
+
+@st.cache_data(ttl=86400, show_spinner=False)
+def follow_short_link(url):
+    return resolve_short_link(url)
+
+
+with tab_route:
+    st.caption("Choisis les personnes à visiter : un lien Google Maps s'ouvre sur le téléphone avec le trajet, "
+               "au départ de la position du téléphone. Les adresses se saisissent dans le Sheet (colonnes Adresse, "
+               "Localité, Ville). Dans Adresse, on peut coller un lien Google Maps ou des coordonnées (36.80, 10.18) : "
+               "c'est plus précis qu'un texte.")
+    r1, r2, r3 = st.columns([2, 2, 1])
+    r_text = r1.text_input("Rechercher", key="route_search")
+    r_villes = sorted({str(v).strip() for v in wide["Ville"].dropna() if str(v).strip()})
+    r_ville = r2.multiselect("Ville", r_villes, key="route_ville", placeholder="Toutes les villes")
+    r_only = r3.toggle("Avec adresse seulement", value=True, key="route_only")
+
+    people = wide[["Nom", "Téléphone", "Grade", "Statut", "Ville", "Localité", "Adresse", "Région", "Pays"]].copy()
+    people["_key"] = wide.apply(lambda r: outreach.row_key(r.to_dict()), axis=1)
+    people["_has_address"] = (people["Adresse"].fillna("").astype(str).str.strip() != "") | \
+                             (people["Localité"].fillna("").astype(str).str.strip() != "")
+    st.caption(f"{int(people['_has_address'].sum())} personne(s) sur {len(people)} ont une adresse ou une localité.")
+
+    shown = people
+    if r_only:
+        shown = shown[shown["_has_address"]]
+    if r_ville:
+        shown = shown[shown["Ville"].isin(r_ville)]
+    if r_text:
+        blob = shown[["Nom", "Téléphone", "Ville", "Localité"]].fillna("").astype(str).agg(" ".join, axis=1).str.lower()
+        shown = shown[blob.str.contains(r_text.lower(), regex=False)]
+    shown = shown.sort_values(["Ville", "Localité", "Nom"], key=lambda c: c.fillna("").astype(str).str.lower())
+
+    chosen_keys = st.session_state.setdefault("route_sel", set())
+    table = shown[["Nom", "Ville", "Localité", "Adresse", "Téléphone", "Statut"]].copy()
+    table.insert(0, "Choisir", shown["_key"].isin(chosen_keys).to_numpy())
+    st.caption(f"{len(table)} personne(s) affichée(s)")
+    edited = st.data_editor(table, hide_index=True, width="stretch",
+                            key=f"route_editor_{r_text}_{'|'.join(r_ville)}_{r_only}",
+                            disabled=[c for c in table.columns if c != "Choisir"],
+                            column_config={"Choisir": st.column_config.CheckboxColumn("Choisir")})
+    ticked = set(shown["_key"][edited["Choisir"].to_numpy()])
+    chosen_keys = (chosen_keys - set(shown["_key"])) | ticked
+    st.session_state["route_sel"] = chosen_keys
+
+    picked = people[people["_key"].isin(chosen_keys)].sort_values(
+        ["Ville", "Localité", "Nom"], key=lambda c: c.fillna("").astype(str).str.lower())
+    c1, c2 = st.columns([4, 1])
+    c1.subheader(f"Trajet ({len(picked)} personne(s) choisie(s))")
+    if c2.button("Vider la sélection"):
+        st.session_state["route_sel"] = set()
+        st.rerun()
+    stops, no_stop = [], []
+    for r in picked.itertuples():
+        stop, problem = make_stop(r.Adresse, r.Localité, r.Ville, r.Région, r.Pays, resolve=follow_short_link)
+        (stops if stop else no_stop).append((r.Nom, stop or problem))
+    if no_stop:
+        st.warning("Sans arrêt exploitable : " + " ; ".join(f"{nom} ({why})" for nom, why in no_stop))
+    if stops:
+        st.caption("Ordre des arrêts : par ville puis localité. Google Maps ne le réorganise pas.")
+        st.dataframe(pd.DataFrame({"#": range(1, len(stops) + 1), "Nom": [n for n, _ in stops],
+                                   "Arrêt envoyé à Maps": [s for _, s in stops]}), hide_index=True, width="stretch")
+        links = route_links([s for _, s in stops])
+        for i, link in enumerate(links, 1):
+            label = "Ouvrir le trajet dans Google Maps" if len(links) == 1 else f"Trajet {i}/{len(links)}"
+            st.link_button(label, link, type="primary")
+        if len(links) > 1:
+            st.caption("Une liste longue est coupée en plusieurs liens : chacun démarre là où le précédent finit.")
+
