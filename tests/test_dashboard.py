@@ -25,7 +25,20 @@ def test_new_tabs_show_network_health_and_prospects(db, monkeypatch, tmp_path):
     assert metrics["Inactifs à relancer"] == "3"                  # fixtures: members 0, 4, 8 are blocked
     assert metrics["Prospects (contacts hors réseau)"] == "40"    # 41 people, 1 of them is a network member
     assert metrics["Déjà dans le réseau"] == "1"
-    assert [t.label for t in at.tabs] == ["À faire", "Vue d'ensemble", "Réseau", "Arbre du réseau", "Progression", "Anniversaires", "Prospects", "Suivi", "Carte", "Trajets"]
+    assert [t.label for t in at.tabs] == ["À faire", "Vue d'ensemble", "Réseau", "Arbre du réseau", "Progression",
+                                          "Historique", "Anniversaires", "Prospects", "Suivi", "Carte", "Trajets"]
+
+
+def test_history_tab_renders_with_only_one_day_of_data(db, monkeypatch, tmp_path):
+    """The fixtures db has gone through dbt build exactly once: fct_network_history exists (one
+    current row per member) but holds no actual transitions yet -- the tab must still render."""
+    monkeypatch.setenv("CNP_DB", db)
+    monkeypatch.setenv("CNP_OUTREACH", str(tmp_path / "empty.duckdb"))
+    at = AppTest.from_file("../app/dashboard.py", default_timeout=30).run()
+    assert not at.exception
+    hist_tab = next(t for t in at.tabs if t.label == "Historique")
+    assert not hist_tab.exception
+    assert any("Un seul point pour l'instant" in c.value for c in hist_tab.get("caption"))
 
 
 def test_overview_lists_shared_numbers_to_check(db, monkeypatch, tmp_path):
