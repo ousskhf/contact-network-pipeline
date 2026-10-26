@@ -33,7 +33,8 @@ def test_progress_vs_objective_picks_metric_and_pending():
     assert list(out["% de l'objectif"].iloc[:2]) == [50.0, 20.0] and pd.isna(out["% de l'objectif"].iloc[2])
     only_done = progress_vs_objective(df, "Ventes équipe", include_pending=False)
     assert only_done.set_index("nom").loc["b", "valeur"] == 90.0
-    assert set(METRICS) == {"Ventes perso", "Ventes équipe", "Ventes descendance"}
+    assert {"Ventes perso", "Ventes équipe", "Ventes descendance"} <= set(METRICS)           # original TTC keys kept
+    assert {"Ventes perso (HT)", "Ventes équipe (NET)", "Ventes parrainage (TTC)"} <= set(METRICS)  # new variants
 
 
 def test_upcoming_birthdays_windows_leap_day_and_links():

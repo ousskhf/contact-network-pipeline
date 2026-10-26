@@ -272,15 +272,15 @@ with tab_prog:
         st.caption("La source ne précise pas quelle vente mesure l'objectif d'un grade : choisis la mesure comparée. "
                    "Le pourcentage est indicatif, pas la règle officielle de passage.")
         f1, f2, f3 = st.columns(3)
-        metric = f1.selectbox("Mesure comparée à l'objectif", list(METRICS), index=1)
+        metric = f1.selectbox("Mesure comparée à l'objectif", list(METRICS), index=1)   # "Ventes équipe"
         pending = f2.checkbox("Inclure les ventes en attente", value=True)
         active_only = f3.checkbox("Actifs seulement", value=True)
         pv = progress_vs_objective(prog[prog["is_active"]] if active_only else prog, metric, pending)
         view_cols = ["nom", "téléphone", "grade", "next_grade", "next_objective", "valeur", "% de l'objectif",
-                     "is_promoted", "eligible_grade", "direct_count"]
+                     "is_promoted", "eligible_grade", "direct_count", "sponsor_name"]
         pv_view = pv[view_cols].rename(columns={"next_grade": "grade suivant", "next_objective": "objectif publié",
                                                 "is_promoted": "promu", "eligible_grade": "éligible (source)",
-                                                "direct_count": "directs"})
+                                                "direct_count": "directs", "sponsor_name": "sponsor"})
         st.dataframe(pv_view, hide_index=True, width="stretch")
         csv_button("Télécharger (CSV)", pv_view, "progression.csv")
 

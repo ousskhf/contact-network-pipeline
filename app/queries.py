@@ -78,15 +78,18 @@ def merge_conflicts(con, exclude=()):
 
 
 def same_number_links(con, exclude=()):
-    """Network members linked to a contact only because they share a number, not because the names fit."""
+    """Network members linked to a contact only because they share a number, not because the names fit.
+    Grade/sponsor/direct_count are included so a human reviewing the link has enough context to judge it."""
     return _optional(
         con, "select f.name as membre, concat_ws(' | ', d.name, d.aliases) as \"contact avec ce numéro\", "
              "(select max(p.n_members) from main.phone_share p where p.phone_norm in (s.phone_norm, s.phone2_norm)) "
-             "as \"membres sur ce numéro\" "
+             "as \"membres sur ce numéro\", "
+             "coalesce(f.grade, 'Inconnu') as grade, f.sponsor_name as sponsor, f.direct_count as directs "
              "from main.fct_network_membership f join main.dim_person d using (person_id) "
              "join main.stg_network s using (member_row) "
              "where f.link_kind = 'same_number' and not list_contains(?::BIGINT[], f.person_id) "
-             "order by f.member_row", [_ids(exclude)], ["membre", "contact avec ce numéro", "membres sur ce numéro"])
+             "order by f.member_row", [_ids(exclude)],
+        ["membre", "contact avec ce numéro", "membres sur ce numéro", "grade", "sponsor", "directs"])
 
 
 def quality(con) -> dict:
@@ -143,9 +146,20 @@ def tracker(con):
     return df
 
 
+# TTC entries keep their original labels (dashboard.py and tests reference them by name);
+# HT/NET/parrainage are new, additive.
 METRICS = {"Ventes perso": ("personal_sales_ttc", "pending_personal_sales_ttc"),
            "Ventes équipe": ("team_sales_ttc", "pending_team_sales_ttc"),
-           "Ventes descendance": ("downline_sales_ttc", "pending_downline_sales_ttc")}
+           "Ventes descendance": ("downline_sales_ttc", "pending_downline_sales_ttc"),
+           "Ventes perso (HT)": ("personal_sales_ht", "pending_personal_sales_ht"),
+           "Ventes perso (NET)": ("personal_sales_net", "pending_personal_sales_net"),
+           "Ventes équipe (HT)": ("team_sales_ht", "pending_team_sales_ht"),
+           "Ventes équipe (NET)": ("team_sales_net", "pending_team_sales_net"),
+           "Ventes descendance (HT)": ("downline_sales_ht", "pending_downline_sales_ht"),
+           "Ventes descendance (NET)": ("downline_sales_net", "pending_downline_sales_net"),
+           "Ventes parrainage (TTC)": ("parainage_sales_ttc", "pending_parainage_sales_ttc"),
+           "Ventes parrainage (HT)": ("parainage_sales_ht", "pending_parainage_sales_ht"),
+           "Ventes parrainage (NET)": ("parainage_sales_net", "pending_parainage_sales_net")}
 
 
 def campaign(con):
@@ -156,7 +170,9 @@ def campaign(con):
 def grade_ladder(con):
     return con.execute(
         "select grade, objective as \"objectif publié\", min_vente_perso as \"vente perso min\", "
-        "required_confirmed_directors as \"directeurs confirmés requis\" "
+        "required_confirmed_directors as \"directeurs confirmés requis\", "
+        "group_bonus_rate as \"taux bonus groupe\", personal_discount as \"remise perso\", "
+        "sponsor_bonus_rate as \"taux bonus parrainage\" "
         "from main.dim_grade order by sort_order").df()
 
 
@@ -164,8 +180,15 @@ def progression(con):
     return con.execute(
         "select f.name as nom, s.phone_norm as téléphone, f.grade, f.next_grade, f.next_objective, "
         "f.grade_at_start_name, f.is_promoted, f.eligible_grade, f.direct_count, f.depth, f.is_active, "
-        "f.personal_sales_ttc, f.pending_personal_sales_ttc, f.team_sales_ttc, f.pending_team_sales_ttc, "
-        "f.downline_sales_ttc, f.pending_downline_sales_ttc "
+        "f.sponsor_name, f.group_bonus_rate, "
+        "f.personal_sales_ttc, f.pending_personal_sales_ttc, "
+        "f.personal_sales_ht, f.pending_personal_sales_ht, f.personal_sales_net, f.pending_personal_sales_net, "
+        "f.team_sales_ttc, f.pending_team_sales_ttc, "
+        "f.team_sales_ht, f.pending_team_sales_ht, f.team_sales_net, f.pending_team_sales_net, "
+        "f.downline_sales_ttc, f.pending_downline_sales_ttc, "
+        "f.downline_sales_ht, f.pending_downline_sales_ht, f.downline_sales_net, f.pending_downline_sales_net, "
+        "f.parainage_sales_ttc, f.pending_parainage_sales_ttc, "
+        "f.parainage_sales_ht, f.pending_parainage_sales_ht, f.parainage_sales_net, f.pending_parainage_sales_net "
         "from main.fct_network_membership f join main.stg_network s using (member_row)").df()
 
 
@@ -180,7 +203,7 @@ def network_nodes(con):
 def network_members(con):
     """Every network member with the numbers and the contact link used to export them to a phone."""
     return con.execute(
-        "select f.user_id, f.sponsor_id, f.name, f.grade, f.is_active, f.person_id, "
+        "select f.user_id, f.sponsor_id, f.name, f.grade, f.is_active, f.person_id, f.link_kind, "
         "s.phone_norm, s.phone2_norm "
         "from main.fct_network_membership f join main.stg_network s using (member_row) order by f.member_row").df()
 
@@ -322,12 +345,14 @@ def network_export(members, wide, statuses=ALL_STATUSES, only_new=True, active="
 
     people: DataFrame nom, téléphone, grade, actif, statut. `wide` must hold every tracker row,
     archived ones included, so an archived person is found and filtered out by status.
-    only_new: leave out members already in the phone contacts (linked to a contact by number).
+    only_new: leave out members already in the phone contacts (linked to a contact by number) --
+    but a member linked only because they share a number with someone else's contact
+    (link_kind == 'same_number') is not that contact, so they're still offered, under their own name.
     active: "tous", "actifs" or "inactifs". grades / user_ids: keep only these (None = no filter)."""
     lookup = _status_lookup(wide)
     rows, no_number = [], 0
     for m in members.itertuples():
-        if only_new and pd.notna(m.person_id):
+        if only_new and pd.notna(m.person_id) and m.link_kind != "same_number":
             continue
         if active != "tous" and bool(m.is_active) != (active == "actifs"):
             continue
