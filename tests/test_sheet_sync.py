@@ -104,8 +104,8 @@ def test_end_to_end_with_pipeline_data(db, tmp_path):
     base = sheet_sync.tracker_rows(db)
     assert base["Notes"].fillna("").str.startswith(outreach.NETWORK_NOTE).any()          # network-only members are included
     head = BASE_COLS + sheet_sync.SYNCED + PIPELINE_COLUMNS
-    sheet = FakeSheet([head] + [[sheet_sync.norm(h, r.get(h) if h != NOTES_HEADER else "") for h in head]
-                                for r in base.to_dict("records")])
+    sheet = FakeSheet([head] + [[sheet_sync.norm(h, "" if h == NOTES_HEADER else r.get(sheet_sync.PIPELINE_RENAMES.get(h, h)))
+                                 for h in head] for r in base.to_dict("records")])
     first = sheet_sync.sync(sheet, db, store)
     assert not first.local and not first.cells and not first.appended and not first.conflicts
     # edits in the Sheet on the first person; a dashboard entry on the second
