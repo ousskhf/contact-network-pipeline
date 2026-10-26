@@ -5,6 +5,7 @@ accounts.json
 downline_raw*.json
 *.duckdb
 .env
+.sensitive-terms          # local list of real names/brand name for the pre-commit hook (make install-hooks)
 
 __pycache__/
 *.py[cod]

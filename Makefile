@@ -27,6 +27,9 @@ sync:                      # two-way sync with the shared Google Sheet (needs CN
 	$(RUN) python -m ingest.sheet_sync
 format-sheet:              # dropdowns, colours, frozen header and help tab on the shared Sheet
 	$(RUN) python -m ingest.sheet_format
+install-hooks:              # once per clone: blocks a commit that adds a real name/IP/secret/brand name
+	git config core.hooksPath .githooks
+	@echo "Add real names, the brand name, etc. to .sensitive-terms (gitignored, one per line) to have the hook catch them."
 up:
 	UID=$$(id -u) docker compose up -d --build dashboard docs
 	@host=$${TAILSCALE_IP:-$$(sed -n 's/^TAILSCALE_IP=//p' .env 2>/dev/null)}; host=$${host:-localhost}; \
