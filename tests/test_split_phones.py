@@ -7,7 +7,7 @@ MACROS = "".join(open(f"dbt/macros/{m}.sql").read() for m in ("normalize_phone",
 
 def split(value):
     sql = jinja2.Template(MACROS + "select {{ split_phones('v') }} from (select ?::varchar as v)").render()
-    return duckdb.sql(sql, params=[value]).fetchone()[0]
+    return duckdb.connect().execute(sql, [value]).fetchone()[0]
 
 
 @pytest.mark.parametrize("raw, expected", [
