@@ -10,9 +10,9 @@ def test_dashboard_renders_expected_numbers(db, monkeypatch, tmp_path):
     metrics = {m.label: m.value for m in at.metric}
     assert metrics["Lignes de contacts"] == "44"
     assert metrics["Personnes uniques"] == "41"
-    assert metrics["Réseau relié aux contacts"] == "1/12"
+    assert metrics["Réseau relié aux contacts"] == "2/12"       # members 0 and 1 share a contact number
     assert metrics["Numéros invalides"] == "2"            # the two short-code entries
-    assert metrics["Avec email"] == "1/52"
+    assert metrics["Avec email"] == "1/51"
 
 
 def test_new_tabs_show_network_health_and_prospects(db, monkeypatch, tmp_path):

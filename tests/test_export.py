@@ -11,9 +11,9 @@ def _rows(db, tmp_path):
 
 def test_row_count_people_plus_unmatched_network(db, tmp_path):
     n, rows = _rows(db, tmp_path)
-    assert n == len(rows) == 41 + 11               # 41 people, 11 of 12 network members not in contacts
+    assert n == len(rows) == 41 + 10               # 41 people, 10 of 12 network members not in contacts (2 share a contact number)
     assert "sort_key" not in rows[0]
-    assert sum(r["Notes"].startswith("Importé du réseau") for r in rows) == 11
+    assert sum(r["Notes"].startswith("Importé du réseau") for r in rows) == 10
 
 
 def test_fourth_number_is_not_lost(db, tmp_path):

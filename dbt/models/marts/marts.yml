@@ -16,3 +16,11 @@ models:
         tests: [unique, not_null]
       - name: user_id
         tests: [unique]
+  - name: phone_share
+    columns:
+      - name: phone_norm
+        tests: [unique, not_null]
+  - name: merge_review
+    columns:
+      - name: person_id
+        tests: [unique, not_null]
