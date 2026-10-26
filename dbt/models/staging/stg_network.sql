@@ -1,8 +1,8 @@
 select
     row_number() over () as member_row,
     trim(concat_ws(' ', first_name, last_name)) as name,
-    {{ normalize_phone('phone') }} as phone_norm,
-    {{ normalize_phone('phone2') }} as phone2_norm,
+    {{ split_phones('phone') }}[1] as phone_norm,
+    coalesce({{ normalize_phone('phone2') }}, {{ split_phones('phone') }}[2]) as phone2_norm,
     boutique_code,
     numero_membre,
     grade,
