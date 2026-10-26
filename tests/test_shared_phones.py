@@ -34,3 +34,9 @@ def test_shared_number_is_flagged_and_linked_by_number_only(db):
     assert set(kinds) <= {None, "name_match", "same_number"}
     assert con.execute("select count(*) from main.merge_review").fetchone()[0] == \
         con.execute("select count(*) from main.merge_audit").fetchone()[0]
+
+
+def test_review_queries_fall_back_to_empty_when_models_are_missing(tmp_path):
+    from app.queries import merge_conflicts, same_number_links
+    con = duckdb.connect(str(tmp_path / "old.duckdb"))
+    assert merge_conflicts(con).empty and same_number_links(con).empty

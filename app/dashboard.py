@@ -16,9 +16,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from app.network_tree import (ancestors, descendant_counts, echarts_html, echarts_tree, grade_colors, index_tree,
                               subtree, treemap_data)
 from app.queries import (METRICS, archived_person_ids, birthdays_source, campaign, connect, due_followups, grade_health,
-                         grade_ladder, inactive_by_impact, inactive_members, invalid_numbers, merge_report,
+                         grade_ladder, inactive_by_impact, inactive_members, invalid_numbers, merge_conflicts, merge_report,
                          near_promotion, network_by_grade, network_nodes, network_phones, progress_vs_objective,
-                         progression, quality_from_rows, summary, tracker, unscheduled_interested, upcoming_birthdays)
+                         progression, quality_from_rows, same_number_links, summary, tracker, unscheduled_interested, upcoming_birthdays)
 from ingest import outreach
 
 st.set_page_config(page_title="Contacts & réseau", layout="wide")
@@ -55,6 +55,7 @@ try:
     s = summary(con, gone)
     grades, merges, invalid = network_by_grade(con), merge_report(con, gone), invalid_numbers(con, gone)
     health, inactive = grade_health(con), inactive_members(con)
+    conflicts, by_number = merge_conflicts(con, gone), same_number_links(con, gone)
     cam, ladder, prog, born = campaign(con), grade_ladder(con), progression(con), birthdays_source(con)
     nodes, phones = network_nodes(con), network_phones(con)
 finally:
@@ -141,6 +142,27 @@ with tab_over:
     st.subheader("Doublons fusionnés")
     st.caption("Lignes de contacts fusionnées car elles partagent un numéro — à vérifier si deux personnes partagent le même téléphone.")
     st.dataframe(merges, hide_index=True, width="stretch")
+
+    st.subheader("Numéros partagés : à vérifier")
+    st.caption("Un numéro n'est pas une personne : des membres donnent le leur à ceux qui les entourent pour les livraisons. "
+               "Rien n'est modifié ici, c'est une liste de contrôle.")
+    st.markdown(f"**Contacts fusionnés avec des noms différents ({len(conflicts)})**")
+    st.caption("Ces fiches ont été fusionnées car elles partagent un numéro, mais leurs noms ne correspondent pas : "
+               "deux personnes sur le même téléphone, ou la même personne écrite autrement. "
+               "Un seul nom de famille en commun ne compte pas comme une correspondance.")
+    if conflicts.empty:
+        st.caption("Rien à vérifier (ou le pipeline n'a pas encore été relancé depuis cette fonction).")
+    else:
+        st.dataframe(conflicts.drop(columns="person_id"), hide_index=True, width="stretch")
+        csv_button("Télécharger la liste (CSV)", conflicts.drop(columns="person_id"), "fusions_a_verifier.csv")
+    st.markdown(f"**Membres reliés à un contact par le numéro seulement ({len(by_number)})**")
+    st.caption("Le numéro est dans tes contacts, mais sous un autre nom : le membre compte comme « déjà dans mes contacts » "
+               "sans y être sous son propre nom.")
+    if by_number.empty:
+        st.caption("Aucun.")
+    else:
+        st.dataframe(by_number, hide_index=True, width="stretch")
+
 
 with tab_net:
     total, n_inactive = int(health["total"].sum()), len(inactive)
