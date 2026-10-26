@@ -6,8 +6,8 @@
     then [left(regexp_replace({{ col }}, '\D', '', 'g'), 8), right(regexp_replace({{ col }}, '\D', '', 'g'), 8)]
   when len(regexp_split_to_array(trim({{ col }}), '\s*[/;]\s*|\s*-\s*')) > 1
    and list_bool_and(list_transform(regexp_split_to_array(trim({{ col }}), '\s*[/;]\s*|\s*-\s*'),
-                                    t -> regexp_matches({{ normalize_phone('t') }}, '^[0-9]{8}$')))
-    then list_transform(regexp_split_to_array(trim({{ col }}), '\s*[/;]\s*|\s*-\s*'), t -> {{ normalize_phone('t') }})
+                                    lambda t: regexp_matches({{ normalize_phone('t') }}, '^[0-9]{8}$')))
+    then list_transform(regexp_split_to_array(trim({{ col }}), '\s*[/;]\s*|\s*-\s*'), lambda t: {{ normalize_phone('t') }})
   else [{{ normalize_phone(col) }}]
 end)
 {% endmacro %}
