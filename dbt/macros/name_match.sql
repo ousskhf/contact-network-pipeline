@@ -2,7 +2,7 @@
 {% macro name_tokens(col) %}
 list_distinct(list_filter(
     string_split(trim(regexp_replace(lower(strip_accents(coalesce({{ col }}, ''))), '[^\pL\pN]+', ' ', 'g')), ' '),
-    t -> length(t) >= 2))
+    lambda t: length(t) >= 2))
 {% endmacro %}
 
 {# Two token lists are the same person when either is empty (nothing to compare) or they share two tokens,

@@ -25,7 +25,7 @@ select base.*,
     case
         when base.person_id is null then null
         when list_bool_or(list_transform(string_split(concat_ws(' | ', d.name, d.aliases), ' | '),
-                 x -> {{ names_compatible(name_tokens('base.name'), name_tokens('x')) }})) then 'name_match'
+                 lambda x: {{ names_compatible(name_tokens('base.name'), name_tokens('x')) }})) then 'name_match'
         else 'same_number'
     end as link_kind
 from base left join {{ ref('dim_person') }} d using (person_id)
