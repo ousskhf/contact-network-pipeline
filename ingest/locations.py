@@ -8,6 +8,8 @@ differently, and the lists are not exhaustive, so the Sheet accepts other values
 import json
 from pathlib import Path
 
+import pandas as pd
+
 COUNTRY = "Tunisie"
 _PATH = Path(__file__).with_name("tunisia_locations.json")
 
@@ -38,7 +40,7 @@ def lieux_rows() -> list[tuple[str, str, str]]:
 
 def strip_region(value) -> str:
     """"Ariana - Soukra" -> "Soukra": the Ville dropdown used to hold the région in front of every name."""
-    text = "" if value is None else str(value).strip()
+    text = "" if value is None or pd.isna(value) else str(value).strip()     # a missing cell, not the text "nan"
     for region, names in load().items():
         prefix = f"{region}{SEPARATOR}"
         if text.startswith(prefix) and text[len(prefix):] in names:

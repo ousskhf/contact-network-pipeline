@@ -33,6 +33,11 @@ def test_ville_table_lists_placed_people_with_a_ville():
     assert carte.by_ville(people((None, None, None))).empty
 
 
+def test_ville_table_skips_a_missing_ville_instead_of_listing_nan():
+    df = people((None, "Tunis", float("nan")), (None, "Tunis", pd.NA), (None, "Sousse", "Sousse"))
+    assert carte.by_ville(df).to_dict("records") == [{"Région": "Sousse", "Ville": "Sousse", "Personnes": 1}]
+
+
 def test_carte_tab_shows_coverage_and_the_people_to_locate(db, monkeypatch, tmp_path):
     monkeypatch.setenv("CNP_DB", db)
     monkeypatch.setenv("CNP_OUTREACH", str(tmp_path / "empty.duckdb"))
