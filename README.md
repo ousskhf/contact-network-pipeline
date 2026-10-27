@@ -15,6 +15,8 @@ screenshot below comes from synthetic fixtures (the UI is in French).
 | ![To do](docs/screenshots/todo.png) | ![Overview](docs/screenshots/overview.png) |
 | **Network tree** | **Grade progress** |
 | ![Network tree](docs/screenshots/network-tree.png) | ![Grade progress](docs/screenshots/grade-progress.png) |
+| **Map by region** | **Route builder** |
+| ![Map](docs/screenshots/carte.png) | ![Routes](docs/screenshots/trajets.png) |
 
 ## The problem
 
