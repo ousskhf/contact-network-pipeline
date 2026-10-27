@@ -150,7 +150,7 @@ to a phone. It is a view over the marts, not a second source of truth.
 
 ## Testing
 
-144 pytest tests (loaders, vCard parsing and export, dashboard queries and launch, outreach, sheet sync and
+145 pytest tests (loaders, vCard parsing and export, dashboard queries and launch, outreach, sheet sync and
 formatting, locations, shared-number links, the map and route tabs) plus dbt tests that fail the build
 when a person or a number is lost or a pair is duplicated. All of it runs on the synthetic fixtures, so
 the same suite can live in a public repo, and GitHub Actions runs it on every pull request. The test
@@ -177,7 +177,7 @@ are not shown here.
 cp .env.example .env              # variable names only; put nothing sensitive in git
 make build
 make demo                         # builds the warehouse from the synthetic fixtures
-make test                         # 144 tests, a few minutes
+make test                         # 145 tests, a few minutes
 ```
 
 `make demo` has its own warehouse and outreach store (`data/demo.duckdb`, `data/demo_outreach.duckdb`),
