@@ -1,14 +1,16 @@
 # contact-network-pipeline
 
-An ELT pipeline that turns a messy phone contact list and a referral-network export into one clean,
-deduplicated view of every person I need to follow up with, explored in a dashboard and kept in step
-with a shared Google Sheet. Nothing is dropped silently, every merge can be reviewed, and the network's
-sales, grades and activity are kept over time. Built as a Data Engineering bootcamp project, replacing
-an earlier chain of ad-hoc scripts.
+A data pipeline and dashboard built with a member of a direct-selling company's sales network in
+Tunisia, to support their day-to-day work: who to contact today, which members have gone inactive, and
+how everyone is progressing towards the next grade. It merges their phone contacts with the network
+export into one deduplicated list of people, never drops data silently, lists every merge for review,
+and keeps sales, grades and activity over time. Because a spreadsheet is the tool they already know,
+the same list lives in a shared Google Sheet that stays in step with the dashboard. It replaced a chain
+of ad-hoc scripts.
 
-This README explains why it is built the way it is. The repo contains **no real data**: contacts and
-network members are personal data, so real exports and the warehouse stay out of git and every
-screenshot below comes from synthetic fixtures (the UI is in French).
+The repository contains **no real data**. Contacts and network members are personal data, so real
+exports and the warehouse stay out of git, and every screenshot below comes from synthetic fixtures.
+The interface is in French, the language of its user.
 
 | To do today | Overview and data quality |
 |---|---|
@@ -20,20 +22,39 @@ screenshot below comes from synthetic fixtures (the UI is in French).
 
 ## The problem
 
-I kept a contact tracker for people I follow up with, fed by two sources: my phone contacts and the
-export of a referral network (who recruited whom, grades, sales). The earlier scripts had two problems
-I could not live with:
+The person I built this for works with two lists that don't line up: the contacts on their phone, and
+the export of their sales network (who recruited whom, grades, sales). They need to know who to contact
+today, which members have gone quiet, and who is close to the next grade. The chain of scripts they had
+before could not answer that reliably, for three reasons:
 
 - **Lost data.** The tracker had three phone columns and silently dropped a fourth number.
 - **Duplicates.** The same person appears several times in a phone export, under different names and
   numbers, and merging them by hand does not scale.
-
-A third problem showed up once the two sources met: **a phone number is a channel, not an identity.**
-Members give their number to people under them for deliveries, so one number can belong to several
-people. See the decisions below for how that changed the design.
+- **A phone number is a channel, not an identity.** Members give their number to people under them for
+  deliveries, so one number can belong to several people, and matching the two lists on the number
+  alone links the wrong people. The design decisions below show how this changed the pipeline.
 
 So the goal was not a prettier sheet but a pipeline that can say what it did, and fails loudly when
 it loses something.
+
+## What it lets you do
+
+The dashboard follows one rule: **information, then decision, then action.** Each screen shows only what
+supports a decision, and each decision ends in something you can do from the same screen.
+
+| Information | Decision | Action |
+|---|---|---|
+| Overdue follow-ups, and interested people with no follow-up date | Who to contact today | Open a WhatsApp chat in one tap (nothing is sent automatically), then record the outcome |
+| Inactive members, ranked by the size of the branch that depends on them | Which members are worth reactivating | Contact them, or note them for replacement |
+| Members at 60-99% of the next grade, with what is left to do | Who to help finish before the campaign ends | Contact them with a concrete target |
+| Branch sizes, grade progress, and how sales, grade and activity changed over time | Where the network is growing or stalling | Choose which branch to support |
+| People per region, and the people still to locate | Where to visit | Build a Google Maps route from the people chosen |
+| Members not yet in the phone | Who to add to the contacts | Export them as a vCard |
+| Birthdays in the next days | Who to greet | Open a WhatsApp chat |
+| Status, dates and notes for each person | What happens next with each person | Record the status and the next follow-up date, which feeds the to-do lists |
+| Merges and shared numbers | Which links to trust | Review them before relying on the data |
+
+It is a view over the marts, not a second source of truth.
 
 ## Architecture
 
@@ -131,6 +152,11 @@ no guessing beyond that. Town and locality dropdowns are chained to the region f
 table (24 regions, 257 delegations, 4,671 localities). The Sheets API cannot do dependent dropdowns, so
 a small Apps Script does it.
 
+**Information, then decision, then action.** The dashboard shows a figure only when it supports a
+decision, and a decision only when there is something to do about it from the same screen. That is why
+the list of members close to the next grade shows what is left to reach the objective, and why the
+lists carry a link to act on them. New features follow the same test.
+
 **DuckDB.** One local file, no server to run, and fast enough for this volume. Its single-writer limit is
 a known trade-off, handled by not refreshing while the dashboard holds a long query.
 
@@ -138,15 +164,6 @@ a known trade-off, handled by not refreshing while the dashboard holds a long qu
 `DockerOperator`, so Airflow carries none of its dependencies. The DAG runs daily:
 `fetch_network → check_inputs → load_raw → dbt_build → sheet_sync → export_tracker`, and a failing dbt
 test fails the run.
-
-## What the dashboard is for
-
-A "to do today" list of follow-ups, data-quality and merge review (including the shared numbers to
-check), the referral network as an interactive tree, grade progress against the next grade's published
-objective, the history of sales, grade and activity, upcoming birthdays, and the outreach editor. Two
-tabs help with action: a map of the network by region (with the people still to locate), and a route
-builder that turns chosen people into Google Maps directions. Members can be exported as a vCard to add
-to a phone. It is a view over the marts, not a second source of truth.
 
 ## Testing
 
