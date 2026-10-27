@@ -94,6 +94,21 @@ def test_same_number_link_is_offered_but_a_real_name_match_is_not():
     assert list(out["nom"]) == ["shares a number only"]
 
 
+def test_network_only_status_is_found_through_the_user_id_key():
+    members = _members([[7, None, "Only Member", "Ambassadeur", True, None, None, "20000001", None]])
+    wide = _wide([["Only Member", "20000001", None, None, None, "Converti", "Importé du réseau (membre)"]])
+    wide["user_id"] = [7]
+    assert list(network_export(members, wide, statuses=("Converti",))[0]["nom"]) == ["Only Member"]
+    assert network_export(members, wide, statuses=("À contacter",))[0].empty
+
+
+def test_same_number_member_does_not_inherit_the_contacts_status():
+    members = _members([[7, None, "Member", "Ambassadeur", True, 5, "same_number", "20000001", None]])
+    wide = _wide([["Someone Else", "20000001", None, None, None, "Converti", None]])
+    out = network_export(members, wide)[0]
+    assert list(out["nom"]) == ["Member"] and list(out["statut"]) == ["À contacter"]
+
+
 def test_members_without_a_number_are_counted_not_exported_and_phone2_is_a_fallback():
     members = _members([
         [1, None, "no phone", "Ambassadeur", True, None, None, None, None],

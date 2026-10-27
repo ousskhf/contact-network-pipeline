@@ -396,8 +396,13 @@ def network_export(members, wide, statuses=ALL_STATUSES, only_new=True, active="
             continue
         phone = next((p for p in (m.phone_norm, m.phone2_norm) if isinstance(p, str) and p), None)
         name = str(m.name or "").strip()
-        keys = [f"{p}#{name.lower()}" for p in (m.phone_norm, m.phone2_norm) if isinstance(p, str) and p]
-        keys += [p for p in (m.phone_norm, m.phone2_norm) if isinstance(p, str) and p]
+        numbers = [p for p in (m.phone_norm, m.phone2_norm) if isinstance(p, str) and p]
+        suffixes = [name.lower()]
+        if pd.notna(m.user_id):
+            suffixes.insert(0, str(int(m.user_id)))      # how a network-only row is keyed; the name is the older key
+        keys = [f"{p}#{s}" for s in suffixes for p in numbers]
+        if m.link_kind != "same_number":                 # a shared number's contact is someone else: not their status
+            keys += numbers
         status = next((lookup[k] for k in keys if k in lookup), "À contacter")
         if status not in statuses:
             continue
