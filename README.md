@@ -58,28 +58,35 @@ It is a view over the marts, not a second source of truth.
 
 ## Architecture
 
+```mermaid
+flowchart LR
+    subgraph Sources
+        A[Phone contacts<br/>vcf / csv]
+        B[Network export<br/>fetched nightly]
+    end
+    A --> R[(raw)]
+    B --> R
+    R --> S[staging<br/>one row per number]
+    S --> M[marts<br/>people, network,<br/>history, review lists]
+    M --> T[tracker_export]
+    T --> D[Dashboard]
+    T <--> G[Google Sheet]
+    O[(Outreach store<br/>status, dates, notes)] <--> D
+    O <--> G
+    AF[Airflow, daily] -.-> R
+    AF -.-> M
+    AF -.-> G
 ```
-contacts.vcf/csv ─► raw.contacts ─► stg_contacts ────────┐
-                                  └► stg_contact_phones ─┴► int_contact_person ─► dim_person
-                                         (one row per        (connected          bridge_person_phone
-                                          number, any N)      components)        merge_audit, merge_review
-                                                                                       │
-downline.json ─► raw.network ─► stg_network ─► phone_share ────────────────────────────┤
-                                     │         (members per number)                    ▼
-                                     └─────────────────────────────────► fct_network_membership
-                                                                          (link_kind per member)
-                                     └─────────────────────────────────► fct_network_history
-                                                                          (one row per change)
-                                                                                       │
-                      dashboard (Streamlit) ◄──── tracker_export ──────────► Google Sheet
-                      vCard export, Maps routes
-```
+
+The outreach store is a separate file on purpose: what the user types cannot be rebuilt from the exports,
+so rebuilding the warehouse never touches it. The model-level lineage is in the dbt docs that
+`make demo` generates, and the tables are described under Data model.
 
 | Layer | Role |
 |---|---|
 | raw | Loaded untouched, all text, so a bad rule downstream never costs the original. |
 | staging | One row per phone number; separators and country prefixes normalised; a network field holding two numbers is split. |
-| marts | People (contacts linked by a shared normalised number), the network with how each member links to a contact, its history, and the exported tracker. |
+| marts | The people (contacts merged on a shared valid number), the network members with how each links to a contact, the history of each member's state, the review lists (merges, shared numbers) and the tracker that feeds the dashboard and the Sheet. |
 | tests | dbt tests on the data, pytest on the loaders, dashboard and sync, run in CI on every PR. |
 
 **Stack:** Python, DuckDB, dbt, Streamlit, Airflow (DockerOperator), Docker Compose, Google Sheets API,
@@ -87,18 +94,32 @@ GitHub Actions.
 
 ## Data model
 
-| Table | Grain | Key |
-|---|---|---|
-| `bridge_person_phone` | one row per person and number, no cap | person, number |
-| `dim_person` | one row per merged contact person | `person_id` |
-| `fct_network_membership` | one row per network member, current state | `user_id` (stable id from the source system) |
-| `fct_network_history` | one row per member and change of state | `user_id`, `valide_du` to `valide_au` |
-| `phone_share` | one row per number, with how many members use it | number |
-| `tracker_export` | one row per contact person, plus members not in the contacts | phone, or phone and `user_id` for a member |
+| Table | Grain | Key | Feeds |
+|---|---|---|---|
+| `bridge_person_phone` | one row per person and number, no cap | person, number | the "no number lost" test; linking members to contacts |
+| `dim_person` | one row per merged contact person | `person_id` | the tracker, and the contact side of every link |
+| `merge_audit`, `merge_review` | one row per person built from several contact rows | `person_id` | the merge review lists |
+| `fct_network_membership` | one row per network member, current state | `user_id` (stable id from the source system) | the tree, grade progress, the to-do lists |
+| `fct_network_history` | one row per member and distinct state (a dbt snapshot) | `user_id`, `valide_du` to `valide_au` | the History tab |
+| `phone_share` | one row per valid number, with how many contact people and members use it | number | the shared-number review |
+| `dim_grade`, `dim_campaign` | the published grade ladder (with the next grade and its objective), the campaign | grade, campaign | objectives and progress figures |
+| `tracker_export` | one row per contact person, plus members not in the contacts | phone, or phone and `user_id` for a member | the dashboard and the Sheet |
+
+```mermaid
+erDiagram
+    dim_person ||--|{ bridge_person_phone : "has numbers"
+    bridge_person_phone }o--|| phone_share : "same number"
+    dim_person |o--o{ fct_network_membership : "linked by number (link_kind)"
+    dim_grade ||--o{ fct_network_membership : "has grade"
+    fct_network_membership ||--o{ fct_network_history : "one row per state"
+    dim_person ||--|| tracker_export : "one row each"
+    fct_network_membership |o--o{ tracker_export : "members not in the contacts"
+```
 
 - **Linking a member to a contact** is done on the number, then classified by `link_kind`:
-  `name_match` when the contact's name fits the member's, `same_number` when only the number does (a
-  shared number, so probably someone else's contact), and empty when there is no link.
+  - `name_match`: the contact's name fits the member's, so very likely the same person;
+  - `same_number`: only the number matches. It is a shared number, so probably someone else's contact;
+  - empty: no link.
 - **History** keeps every state a member has had (sales, grade, activity) with a validity range, so a
   change shows up as a new row instead of overwriting the old one.
 - **Bad data** is kept and flagged, not dropped: invalid numbers carry `is_valid = false`, merges are
