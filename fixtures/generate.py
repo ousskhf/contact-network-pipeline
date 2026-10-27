@@ -67,7 +67,12 @@ def downline(contact_rows):
     shared = contact_rows[3]["Phone 1 - Value"]
     for i in range(12):
         gid = random.randint(1, len(GRADES))
-        personal_ttc, team_ttc = random.randint(0, 900), random.randint(0, 3000)
+        personal_raw, team_raw = random.randint(0, 900), random.randint(0, 3000)     # same draws as before: the rest of the sequence is unchanged
+        # sales as a share (0-100 %) of the next grade's objective, so the progress view reads plausibly;
+        # the top grade has no next objective, so it gets a flat ceiling
+        ceiling = GRADES[gid][1] if gid < len(GRADES) else 20000
+        team_ttc = round(ceiling * team_raw / 3000)
+        personal_ttc = round(team_ttc * 0.4 * personal_raw / 900)
         items.append({
             "id": 9000 + i, "userId": 500 + i, "sponsorId": 500 if i else 1,
             "path": f"1.{500 if i else 1}.{500 + i}", "depth": 1 if i < 6 else 2, "directCount": i % 3,
