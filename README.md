@@ -174,13 +174,19 @@ are not shown here.
 ```bash
 cp .env.example .env              # variable names only; put nothing sensitive in git
 make build
-CNP_DB=data/demo.duckdb CNP_OUTREACH=data/demo_outreach.duckdb make demo   # synthetic fixtures
+make demo                         # builds the warehouse from the synthetic fixtures
 make test                         # 144 tests, a few minutes
 ```
 
-Use separate `CNP_DB` and `CNP_OUTREACH` paths for the demo: by default `make demo` and `make run` write
-to the same files, so a demo build would overwrite a real warehouse. The dashboard needs the pinned
-ECharts file (`CNP_ECHARTS`, fetched in the Dockerfile and in CI).
+`make demo` has its own warehouse and outreach store (`data/demo.duckdb`, `data/demo_outreach.duckdb`),
+reads only the fixtures and never touches the Sheet, so it cannot overwrite a real warehouse built with
+`make run`. To browse the demo in the dashboard:
+
+```bash
+CNP_DB=data/demo.duckdb CNP_OUTREACH=data/demo_outreach.duckdb make up
+```
+
+The dashboard needs the pinned ECharts file (`CNP_ECHARTS`, fetched in the Dockerfile and in CI).
 
 ## Limitations
 
