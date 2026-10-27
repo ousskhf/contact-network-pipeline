@@ -157,8 +157,8 @@ details, national IDs and verification tokens. The loader drops these fields in 
 is stored, so the warehouse, the dashboard and the Sheet never hold them. The full API response exists
 in one place only, a local, gitignored file, which is kept on purpose and is the file to protect.
 
-**Outreach notes live in their own database.** What I type (status, dates, notes) cannot be rebuilt
-from the exports, so it sits in a separate DuckDB file. Re-running or rebuilding the warehouse never
+**Outreach notes live in their own database.** What the user types (status, dates, notes) cannot be
+rebuilt from the exports, so it sits in a separate DuckDB file. Re-running or rebuilding the warehouse never
 touches it. Entries are keyed by phone (and by `user_id` for a member who is not in the phone contacts,
 since members can share a phone) and matched through any of a person's numbers, so a re-export or
 re-ordered numbers is fine.
@@ -168,30 +168,31 @@ exports, so members are keyed on `user_id`, the source system's stable id, in th
 and the saved notes. The history stores each change as a validity range instead of overwriting. A row
 number would have silently re-pointed saved notes at the wrong person.
 
-**Two-way sync with a shared Sheet, with clear ownership.** A second person edits the Sheet, so for each
-cell the last synced value is the base: if only the Sheet changed, I keep it; if only the dashboard
-changed, I write it out; if both changed, the Sheet wins and the conflict is printed. Name, phones and
-import notes belong to the pipeline; corrections like town or e-mail are stored as overrides of the
-phone export.
+**Two-way sync with a shared Sheet, with clear ownership.** The user works in the Sheet and the dashboard
+edits the same fields, so for each cell the last synced value is the base: if only the Sheet changed,
+its value is kept; if only the dashboard changed, its value is written out; if both changed, the Sheet
+wins and the conflict is printed. Name, phones and import notes belong to the pipeline; corrections
+like town or e-mail are stored as overrides of the phone export.
 
 **Location in five columns (country, region, town, locality, address).** Phone exports keep the whole
 address as free text, so the pipeline reads a trailing country name as the country and nothing more:
-no guessing beyond that. Town and locality dropdowns are chained to the region from a Tunisian locations
+no guessing beyond that. The map and the route builder read these columns. Town and locality dropdowns are chained to the region from a Tunisian locations
 table (24 regions, 257 delegations, 4,671 localities). The Sheets API cannot do dependent dropdowns, so
 a small Apps Script does it.
-
-**Information, then decision, then action.** The dashboard shows a figure only when it supports a
-decision, and a decision only when there is something to do about it from the same screen. That is why
-the list of members close to the next grade shows what is left to reach the objective, and why the
-lists carry a link to act on them. New features follow the same test.
 
 **DuckDB.** One local file, no server to run, and fast enough for this volume. Its single-writer limit is
 a known trade-off, handled by not refreshing while the dashboard holds a long query.
 
 **Airflow runs the project's own image.** Each DAG task starts the project container with
 `DockerOperator`, so Airflow carries none of its dependencies. The DAG runs daily:
-`fetch_network → check_inputs → load_raw → dbt_build → sheet_sync → export_tracker`, and a failing dbt
-test fails the run.
+`fetch_network → check_inputs → load_raw → dbt_build → sheet_sync → export_tracker`. A failing dbt test
+fails the run, but the network fetch and the Sheet sync fail softly, so an outage at the source or at
+Google never blocks the refresh and the last good data is reused.
+
+**Information, then decision, then action.** The dashboard shows a figure only when it supports a
+decision, and a decision only when there is something to do about it from the same screen. That is why
+the list of members close to the next grade shows what is left to reach the objective, and why the
+lists carry a link to act on them. New features follow the same test.
 
 ## Testing
 
