@@ -196,12 +196,24 @@ lists carry a link to act on them. New features follow the same test.
 
 ## Testing
 
-145 pytest tests (loaders, vCard parsing and export, dashboard queries and launch, outreach, sheet sync and
-formatting, locations, shared-number links, the map and route tabs) plus dbt tests that fail the build
-when a person or a number is lost or a pair is duplicated. All of it runs on the synthetic fixtures, so
-the same suite can live in a public repo, and GitHub Actions runs it on every pull request. The test
-session is isolated from real data: it points every path at a temporary directory and refuses to open
-anything under `data/`.
+The tests target the failures this project exists to prevent: lost data, wrong merges, and real data
+leaking into a test.
+
+- **dbt tests on the data** fail the build, and so the daily run, when a contact row or a phone number
+  is lost between layers (the exported tracker included), when a person and number are listed twice,
+  when a merge is not backed by a valid shared number, when the tracker has the wrong number of rows,
+  or when a member has more than one current history row. Two checks only warn: birth dates that cannot
+  be read, and entries that are not plausible phone numbers.
+- **Fixtures built to be awkward.** The synthetic contacts include one number in two formats, a person
+  with four numbers, an exact duplicate row, two people sharing a short code, and members sharing a
+  number that is also a contact's, so each rule has a case it must get right.
+- **pytest** covers the loaders, vCard parsing and export, the dashboard queries, outreach, the Sheet
+  sync, and the map and route tabs. The whole dashboard is rendered against the fixtures and its figures
+  and tabs are checked. There are over 140 tests, and they run in a few minutes.
+- **Isolated from real data.** A session fixture points every path at a temporary directory, removes
+  the Sheet, organisation and private-network settings, and makes any attempt to open the real `data/`
+  folder with DuckDB fail; a test checks that too. GitHub Actions runs the suite on every pull request
+  and on `main`, and it builds the dbt models, so the data tests run there as well.
 
 ## Results
 
@@ -223,7 +235,7 @@ are not shown here.
 cp .env.example .env              # variable names only; put nothing sensitive in git
 make build
 make demo                         # builds the warehouse from the synthetic fixtures
-make test                         # 145 tests, a few minutes
+make test                         # the full suite, a few minutes
 ```
 
 `make demo` has its own warehouse and outreach store (`data/demo.duckdb`, `data/demo_outreach.duckdb`),
