@@ -131,25 +131,31 @@ erDiagram
 `bridge_person_phone` has no cap, and a dbt test, `no_phone_lost`, fails the build if any number
 disappears.
 
-**A shared number merges contacts, but only suggests a link to a member.** Among phone contacts a shared
-number is the one signal I trust, and it matches the old behaviour. The cost is that two relatives
-sharing a phone get merged, so I made the cost visible: `merge_audit` lists every merge and the dashboard
-shows the ones whose names disagree for review. For network members I started with the same rule and
-revised it: many members share a number, so a match on the number alone is now marked `same_number`,
-listed for review, and such a member is offered in the vCard export under their own name instead of as
-the contact. I kept the contact merge rule as it is until the review is done, because changing it
-changes tracker rows, Sheet rows and saved outreach keys.
+**A shared number merges contacts, but only suggests a link to a member.** In a phone export, one
+number saved under two names is almost always the same person, so a shared valid number is the signal
+I merge on. The cost is that two relatives on one phone get merged, so I made the cost visible:
+`merge_audit` lists every merge, and the dashboard shows the ones whose names disagree for review.
+
+In the network the same signal misleads, because members give their number to the people under them
+for deliveries. I first applied the same rule there and revised it after seeing how many members share
+numbers. A match on the number alone is now marked `same_number`, listed for review, and offered in the
+vCard export under the member's own name instead of as the contact.
+
+I have not changed the contact merge rule yet. Doing so changes tracker rows, Sheet rows and saved
+outreach keys, so it waits until the flagged merges have been reviewed with the user.
 
 **Only valid numbers can merge people.** Short codes and entries with letters are kept, flagged
 `is_valid = false` and reported as a dbt warning, but never link two contacts. Otherwise two unrelated
 people saved with the same short code would collapse into one.
 
-**No fuzzy matching.** Numbers one digit apart stay separate. A wrong merge is worse than a missed
-one, because it hides a person, so I chose to under-merge and show the rest.
+**No fuzzy matching on numbers.** Numbers one digit apart stay separate. A wrong merge is worse than a
+missed one, because it hides a person, so I chose to under-merge and show the rest. Names are compared
+only to flag a link for review, never to merge two people.
 
 **Sensitive fields never reach the warehouse.** The network export carries password hashes, bank
-details and national IDs. The loader whitelists business fields and drops the rest in memory at load
-time, so there is nothing to leak later.
+details, national IDs and verification tokens. The loader drops these fields in memory before anything
+is stored, so the warehouse, the dashboard and the Sheet never hold them. The full API response exists
+in one place only, a local, gitignored file, which is kept on purpose and is the file to protect.
 
 **Outreach notes live in their own database.** What I type (status, dates, notes) cannot be rebuilt
 from the exports, so it sits in a separate DuckDB file. Re-running or rebuilding the warehouse never
@@ -158,7 +164,8 @@ since members can share a phone) and matched through any of a person's numbers, 
 re-ordered numbers is fine.
 
 **Keep the history, key it on the source system's id.** A member's name and row order change between
-exports, so `user_id` is the key everywhere and the history stores changes as validity ranges. A row
+exports, so members are keyed on `user_id`, the source system's stable id, in the model, the history
+and the saved notes. The history stores each change as a validity range instead of overwriting. A row
 number would have silently re-pointed saved notes at the wrong person.
 
 **Two-way sync with a shared Sheet, with clear ownership.** A second person edits the Sheet, so for each
@@ -235,6 +242,7 @@ The dashboard needs the pinned ECharts file (`CNP_ECHARTS`, fetched in the Docke
 - **A member linked by number only is a guess.** `same_number` marks it, but only a person can settle it.
 - **Addresses are sparse.** The map and the route builder are only as good as the addresses entered in
   the Sheet; the source system has no address field.
+- **The sensitive-field filter is a deny list.** A new sensitive field added by the source would not be caught until it is added to the list.
 - **DuckDB allows one writer.** A refresh has to wait for a long dashboard query.
 - **No cloud deployment yet.** It runs on one machine behind a private network.
 
