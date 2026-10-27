@@ -223,13 +223,16 @@ leaking into a test.
   person as the contact who has that number.
 - **Changes are visible over time.** A member's sales, grade and activity are kept as dated states
   instead of being overwritten by the next export.
-- **Less manual work.** One command rebuilds everything the old script chain did, and `make sync` keeps
-  the Sheet and the dashboard in step without copy and paste.
+- **It runs unattended.** The daily refresh on a shared Airflow platform fetches the network export,
+  rebuilds the warehouse, runs the data checks, syncs the Sheet and exports the tracker. `make run` and
+  `make sync` do the same by hand.
 
 The fixtures are small on purpose (a few dozen contacts and a dozen members), so figures from a real run
 are not shown here.
 
 ## Run it
+
+You need Docker with the Compose plugin.
 
 ```bash
 cp .env.example .env              # variable names only; put nothing sensitive in git
@@ -240,7 +243,8 @@ make test                         # the full suite, a few minutes
 
 `make demo` has its own warehouse and outreach store (`data/demo.duckdb`, `data/demo_outreach.duckdb`),
 reads only the fixtures and never touches the Sheet, so it cannot overwrite a real warehouse built with
-`make run`. To browse the demo in the dashboard:
+`make run`. To browse the demo in the dashboard (this replaces a dashboard that is already running, so stop yours
+first if it holds real data):
 
 ```bash
 CNP_DB=data/demo.duckdb CNP_OUTREACH=data/demo_outreach.duckdb make up
@@ -255,15 +259,19 @@ The dashboard needs the pinned ECharts file (`CNP_ECHARTS`, fetched in the Docke
 - **A member linked by number only is a guess.** `same_number` marks it, but only a person can settle it.
 - **Addresses are sparse.** The map and the route builder are only as good as the addresses entered in
   the Sheet; the source system has no address field.
-- **The sensitive-field filter is a deny list.** A new sensitive field added by the source would not be caught until it is added to the list.
+- **The sensitive-field filter is a deny list.** A new sensitive field added by the source would not be
+  caught until it is added to the list.
+- **The outreach store is not backed up automatically.** It is the one dataset that cannot be rebuilt
+  from the exports, and nothing in the project copies it, so copy `data/outreach.duckdb` before any
+  risky change.
 - **DuckDB allows one writer.** A refresh has to wait for a long dashboard query.
 - **No cloud deployment yet.** It runs on one machine behind a private network.
 
 ## What I learned
 
 The identity question took longer than the code. I first treated a phone number as an identity, it worked
-on my own contacts, and it failed as soon as the network's members shared numbers. Making the merges
-visible (an audit table, a review list) mattered more than making the rule smarter, and keying everything
+on the phone contacts, and it failed as soon as the network's members shared numbers. Making the merges
+visible (an audit table, a review list) mattered more than making the rule smarter, and keying members
 on the source system's stable id saved me from a class of silent mix-ups.
 
 ## Layout
@@ -276,9 +284,16 @@ dags/         Airflow DAG
 apps_script/  script pasted once into the Sheet (locality dropdown)
 fixtures/     synthetic data and its generator
 tests/        pytest suite
+docs/         screenshots
+.github/      CI workflow
+.githooks/    pre-commit check that blocks personal data and secrets
 ```
 
 ## Next
 
-Tighten the contact merge rule after the review, turn the daily sync on, and add cloud deployment and
-infrastructure as code.
+Tighten the contact merge rule once the flagged merges are reviewed, keep adding features from the
+user's feedback, and add cloud deployment and infrastructure as code.
+
+## License
+
+MIT, see [LICENSE](LICENSE).
