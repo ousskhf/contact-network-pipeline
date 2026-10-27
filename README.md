@@ -2,8 +2,9 @@
 
 An ELT pipeline that turns a messy phone contact list and a referral-network export into one clean,
 deduplicated view of every person I need to follow up with, explored in a dashboard and kept in step
-with a shared Google Sheet. Built as a Data Engineering bootcamp project, replacing an earlier chain of
-ad-hoc scripts.
+with a shared Google Sheet. Nothing is dropped silently, every merge can be reviewed, and the network's
+sales, grades and activity are kept over time. Built as a Data Engineering bootcamp project, replacing
+an earlier chain of ad-hoc scripts.
 
 This README explains why it is built the way it is. The repo contains **no real data**: contacts and
 network members are personal data, so real exports and the warehouse stay out of git and every
@@ -25,6 +26,10 @@ I could not live with:
 - **Duplicates.** The same person appears several times in a phone export, under different names and
   numbers, and merging them by hand does not scale.
 
+A third problem showed up once the two sources met: **a phone number is a channel, not an identity.**
+Members give their number to people under them for deliveries, so one number can belong to several
+people. See the decisions below for how that changed the design.
+
 So the goal was not a prettier sheet but a pipeline that can say what it did, and fails loudly when
 it loses something.
 
@@ -34,20 +39,47 @@ it loses something.
 contacts.vcf/csv ─► raw.contacts ─► stg_contacts ────────┐
                                   └► stg_contact_phones ─┴► int_contact_person ─► dim_person
                                          (one row per        (connected          bridge_person_phone
-                                          number, any N)      components)        merge_audit
-downline.json ─► raw.network ─► stg_network ──────────────────────────────────► fct_network_membership
+                                          number, any N)      components)        merge_audit, merge_review
                                                                                        │
-                                                  dashboard (Streamlit) ◄── tracker_export ──► Google Sheet
+downline.json ─► raw.network ─► stg_network ─► phone_share ────────────────────────────┤
+                                     │         (members per number)                    ▼
+                                     └─────────────────────────────────► fct_network_membership
+                                                                          (link_kind per member)
+                                     └─────────────────────────────────► fct_network_history
+                                                                          (one row per change)
+                                                                                       │
+                      dashboard (Streamlit) ◄──── tracker_export ──────────► Google Sheet
+                      vCard export, Maps routes
 ```
 
 | Layer | Role |
 |---|---|
 | raw | Loaded untouched, all text, so a bad rule downstream never costs the original. |
-| staging | One row per phone number; separators and country prefixes normalised. |
-| marts | People (contacts linked by a shared normalised number), the network, and the exported tracker. |
-| tests | dbt tests on the data, pytest on the loaders, dashboard and sync. |
+| staging | One row per phone number; separators and country prefixes normalised; a network field holding two numbers is split. |
+| marts | People (contacts linked by a shared normalised number), the network with how each member links to a contact, its history, and the exported tracker. |
+| tests | dbt tests on the data, pytest on the loaders, dashboard and sync, run in CI on every PR. |
 
-**Stack:** Python, DuckDB, dbt, Streamlit, Airflow (DockerOperator), Docker Compose, Google Sheets API.
+**Stack:** Python, DuckDB, dbt, Streamlit, Airflow (DockerOperator), Docker Compose, Google Sheets API,
+GitHub Actions.
+
+## Data model
+
+| Table | Grain | Key |
+|---|---|---|
+| `bridge_person_phone` | one row per person and number, no cap | person, number |
+| `dim_person` | one row per merged contact person | `person_id` |
+| `fct_network_membership` | one row per network member, current state | `user_id` (stable id from the source system) |
+| `fct_network_history` | one row per member and change of state | `user_id`, `valide_du` to `valide_au` |
+| `phone_share` | one row per number, with how many members use it | number |
+| `tracker_export` | one row per contact person, plus members not in the contacts | phone, or phone and `user_id` for a member |
+
+- **Linking a member to a contact** is done on the number, then classified by `link_kind`:
+  `name_match` when the contact's name fits the member's, `same_number` when only the number does (a
+  shared number, so probably someone else's contact), and empty when there is no link.
+- **History** keeps every state a member has had (sales, grade, activity) with a validity range, so a
+  change shows up as a new row instead of overwriting the old one.
+- **Bad data** is kept and flagged, not dropped: invalid numbers carry `is_valid = false`, merges are
+  listed in `merge_audit`, and merged people whose names disagree are listed in `merge_review`.
 
 ## Key decisions, and why
 
@@ -55,9 +87,14 @@ downline.json ─► raw.network ─► stg_network ─────────�
 `bridge_person_phone` has no cap, and a dbt test, `no_phone_lost`, fails the build if any number
 disappears.
 
-**A shared number means the same person.** It is the one signal I trust, and it matches the old
-behaviour. The cost is that two relatives sharing a phone get merged, so I made the cost visible:
-`merge_audit` lists every merge and the dashboard shows it for review.
+**A shared number merges contacts, but only suggests a link to a member.** Among phone contacts a shared
+number is the one signal I trust, and it matches the old behaviour. The cost is that two relatives
+sharing a phone get merged, so I made the cost visible: `merge_audit` lists every merge and the dashboard
+shows the ones whose names disagree for review. For network members I started with the same rule and
+revised it: many members share a number, so a match on the number alone is now marked `same_number`,
+listed for review, and such a member is offered in the vCard export under their own name instead of as
+the contact. I kept the contact merge rule as it is until the review is done, because changing it
+changes tracker rows, Sheet rows and saved outreach keys.
 
 **Only valid numbers can merge people.** Short codes and entries with letters are kept, flagged
 `is_valid = false` and reported as a dbt warning, but never link two contacts. Otherwise two unrelated
@@ -72,8 +109,13 @@ time, so there is nothing to leak later.
 
 **Outreach notes live in their own database.** What I type (status, dates, notes) cannot be rebuilt
 from the exports, so it sits in a separate DuckDB file. Re-running or rebuilding the warehouse never
-touches it. Entries are keyed by phone and matched through any of a person's numbers, so a re-export
-or re-ordered numbers is fine.
+touches it. Entries are keyed by phone (and by `user_id` for a member who is not in the phone contacts,
+since members can share a phone) and matched through any of a person's numbers, so a re-export or
+re-ordered numbers is fine.
+
+**Keep the history, key it on the source system's id.** A member's name and row order change between
+exports, so `user_id` is the key everywhere and the history stores changes as validity ranges. A row
+number would have silently re-pointed saved notes at the wrong person.
 
 **Two-way sync with a shared Sheet, with clear ownership.** A second person edits the Sheet, so for each
 cell the last synced value is the base: if only the Sheet changed, I keep it; if only the dashboard
@@ -92,24 +134,75 @@ a known trade-off, handled by not refreshing while the dashboard holds a long qu
 
 **Airflow runs the project's own image.** Each DAG task starts the project container with
 `DockerOperator`, so Airflow carries none of its dependencies. The DAG runs daily:
-`check_inputs → load_raw → dbt_build → export_tracker`, and a failing dbt test fails the run.
+`fetch_network → check_inputs → load_raw → dbt_build → sheet_sync → export_tracker`, and a failing dbt
+test fails the run.
 
 ## What the dashboard is for
 
-A "to do today" list of follow-ups, data-quality and merge review, the referral network as an
-interactive tree, grade progress against the next grade's published objective, upcoming birthdays, and
-the outreach editor. It is a view over the marts, not a second source of truth.
+A "to do today" list of follow-ups, data-quality and merge review (including the shared numbers to
+check), the referral network as an interactive tree, grade progress against the next grade's published
+objective, the history of sales, grade and activity, upcoming birthdays, and the outreach editor. Two
+tabs help with action: a map of the network by region (with the people still to locate), and a route
+builder that turns chosen people into Google Maps directions. Members can be exported as a vCard to add
+to a phone. It is a view over the marts, not a second source of truth.
 
 ## Testing
 
-68 pytest tests (loaders, vCard parsing, dashboard queries and launch, outreach, sheet sync and formatting,
-locations) plus dbt tests that fail the build when a person or a number is lost or a pair is duplicated.
-All of it runs on the synthetic fixtures, so the same suite can live in a public repo.
+144 pytest tests (loaders, vCard parsing and export, dashboard queries and launch, outreach, sheet sync and
+formatting, locations, shared-number links, the map and route tabs) plus dbt tests that fail the build
+when a person or a number is lost or a pair is duplicated. All of it runs on the synthetic fixtures, so
+the same suite can live in a public repo, and GitHub Actions runs it on every pull request. The test
+session is isolated from real data: it points every path at a temporary directory and refuses to open
+anything under `data/`.
+
+## Results
+
+- **Nothing is lost silently.** A number that disappears fails the build; every merge and every
+  weak link is listed for review.
+- **Members and contacts are told apart.** Members sharing a number are no longer treated as the same
+  person as the contact who has that number.
+- **Changes are visible over time.** A member's sales, grade and activity are kept as dated states
+  instead of being overwritten by the next export.
+- **Less manual work.** One command rebuilds everything the old script chain did, and `make sync` keeps
+  the Sheet and the dashboard in step without copy and paste.
+
+The fixtures are small on purpose (a few dozen contacts and a dozen members), so figures from a real run
+are not shown here.
+
+## Run it
+
+```bash
+cp .env.example .env              # variable names only; put nothing sensitive in git
+make build
+CNP_DB=data/demo.duckdb CNP_OUTREACH=data/demo_outreach.duckdb make demo   # synthetic fixtures
+make test                         # 144 tests, a few minutes
+```
+
+Use separate `CNP_DB` and `CNP_OUTREACH` paths for the demo: by default `make demo` and `make run` write
+to the same files, so a demo build would overwrite a real warehouse. The dashboard needs the pinned
+ECharts file (`CNP_ECHARTS`, fetched in the Dockerfile and in CI).
+
+## Limitations
+
+- **Merging contacts on a shared number is a heuristic.** It can join two people who share a phone;
+  the review lists exist to catch that, and the rule will be tightened once the review is done.
+- **A member linked by number only is a guess.** `same_number` marks it, but only a person can settle it.
+- **Addresses are sparse.** The map and the route builder are only as good as the addresses entered in
+  the Sheet; the source system has no address field.
+- **DuckDB allows one writer.** A refresh has to wait for a long dashboard query.
+- **No cloud deployment yet.** It runs on one machine behind a private network.
+
+## What I learned
+
+The identity question took longer than the code. I first treated a phone number as an identity, it worked
+on my own contacts, and it failed as soon as the network's members shared numbers. Making the merges
+visible (an audit table, a review list) mattered more than making the rule smarter, and keying everything
+on the source system's stable id saved me from a class of silent mix-ups.
 
 ## Layout
 
 ```
-ingest/       raw loaders and Google Sheet sync
+ingest/       raw loaders, vCard export and Google Sheet sync
 dbt/          staging and mart models, macros, singular tests
 app/          Streamlit dashboard
 dags/         Airflow DAG
@@ -120,4 +213,5 @@ tests/        pytest suite
 
 ## Next
 
-Cloud deployment and infrastructure as code.
+Tighten the contact merge rule after the review, turn the daily sync on, and add cloud deployment and
+infrastructure as code.
