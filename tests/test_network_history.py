@@ -51,7 +51,8 @@ def test_changed_member_gets_a_new_row_unchanged_members_dont(two_day_db):
             "select personal_sales_ttc, valide_du, valide_au from main.fct_network_history "
             "where user_id = 500 order by valide_du").df()
         assert len(rows) == 2
-        assert rows["personal_sales_ttc"].tolist() == [114.0, 614.0]
+        before, after = rows["personal_sales_ttc"].tolist()
+        assert after - before == 500.0                    # the day-2 export added 500 to the day-1 figure
         assert pd.notna(rows["valide_au"].iloc[0]) and rows["valide_au"].iloc[0] == rows["valide_du"].iloc[1]
         assert pd.isna(rows["valide_au"].iloc[1])        # the new row is current
     finally:

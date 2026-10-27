@@ -1,3 +1,5 @@
+import pandas as pd
+
 from ingest import locations, sheet_format
 
 
@@ -38,3 +40,4 @@ def test_strip_region_removes_the_old_prefix_of_known_villes_only():
     assert locations.strip_region("Soukra") == "Soukra" and locations.strip_region("") == ""
     assert locations.strip_region("Ariana - Nulle part") == "Ariana - Nulle part"      # unknown: left as typed
     assert locations.strip_region(None) == ""
+    assert locations.strip_region(float("nan")) == "" and locations.strip_region(pd.NA) == ""     # a missing cell, not "nan"
