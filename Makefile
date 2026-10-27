@@ -11,11 +11,19 @@ fixtures:
 	$(RUN) python fixtures/generate.py
 test:
 	$(RUN) pytest -q
+# The demo gets its own warehouse and outreach store, so it can never overwrite the real ones `make run` uses.
+# A target-specific export beats anything in the shell or .env.
+demo: export CNP_DATA_DIR = fixtures
+demo: export CNP_DB = data/demo.duckdb
+demo: export CNP_OUTREACH = data/demo_outreach.duckdb
+demo: export CNP_EXPORT = data/demo_tracker.csv
+demo: export CNP_SHEET_ID =
 demo: fixtures
 	$(RUN) python -m ingest.load_all
 	$(RUN) dbt build --project-dir dbt --profiles-dir dbt
-	CNP_EXPORT=data/demo_tracker.csv $(RUN) python -m ingest.export
+	$(RUN) python -m ingest.export
 	$(RUN) dbt docs generate --project-dir dbt --profiles-dir dbt
+	@echo "Demo warehouse: $(CNP_DB). Browse it with: CNP_DB=data/demo.duckdb CNP_OUTREACH=data/demo_outreach.duckdb make up"
 run:
 	CNP_DATA_DIR=data $(RUN) python -m ingest.load_all
 	$(RUN) dbt build --project-dir dbt --profiles-dir dbt
