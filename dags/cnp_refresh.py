@@ -19,7 +19,7 @@ HOST_PROJECT = os.environ.get("CNP_HOST_PROJECT", "/opt/contact-network-pipeline
 DATA_DIR = "{{ var.value.get('cnp_data_dir', 'fixtures') }}"
 
 
-def cnp_task(task_id: str, command: str, **extra_env: str) -> DockerOperator:
+def cnp_task(task_id: str, command: str, operator_args: dict | None = None, **extra_env: str) -> DockerOperator:
     return DockerOperator(
         task_id=task_id,
         image=IMAGE,
@@ -36,6 +36,7 @@ def cnp_task(task_id: str, command: str, **extra_env: str) -> DockerOperator:
             "PYTHONPATH": "/work",
             **extra_env,
         },
+        **(operator_args or {}),
     )
 
 
@@ -47,13 +48,22 @@ with DAG(
     default_args={"retries": 1, "retry_delay": timedelta(minutes=5)},
     tags=["cnp"],
 ) as dag:
-    # Soft-fail: a source-system outage or a credential issue must not block the rest of the refresh --
-    # load_raw then falls back to yesterday's downline_raw.json. Skipped entirely against fixtures.
+    # Retry policy: ingest.fetch_network already retries each request (3 tries, 1 s then 2 s backoff). If
+    # an account still fails, it exits non-zero and keeps the previous downline_raw.json; the task is then
+    # retried 3 more times with exponential backoff (10, 20, 40 min), so an outage of a few hours is
+    # absorbed. Only when those run out is the task marked failed -- visibly, not as a silent success --
+    # and check_inputs (trigger_rule all_done) still lets the refresh go on with yesterday's file.
+    # Skipped entirely against fixtures.
     # CNP_NETWORK_PASSWORD is an Airflow Variable (masked in logs/UI because its key contains "password").
     fetch_network = cnp_task(
         "fetch_network",
-        "[ \"$CNP_DATA_DIR\" = fixtures ] || python -m ingest.fetch_network "
-        "|| echo 'WARNING: network fetch failed, reusing last downline_raw.json'",
+        "[ \"$CNP_DATA_DIR\" = fixtures ] || python -m ingest.fetch_network",
+        operator_args={
+            "retries": 3,
+            "retry_delay": timedelta(minutes=10),
+            "retry_exponential_backoff": True,
+            "max_retry_delay": timedelta(hours=1),
+        },
         CNP_NETWORK_API_BASE="{{ var.value.get('cnp_network_api_base', '') }}",
         CNP_NETWORK_EMAIL="{{ var.value.get('cnp_network_email', '') }}",
         CNP_NETWORK_PASSWORD="{{ var.value.get('cnp_network_password', '') }}",
@@ -61,6 +71,7 @@ with DAG(
     check_inputs = cnp_task(
         "check_inputs",
         "test -f $CNP_DATA_DIR/contacts.vcf || test -f $CNP_DATA_DIR/contacts.csv",
+        operator_args={"trigger_rule": "all_done"},   # runs even if fetch_network used up its retries
     )
     load_raw = cnp_task("load_raw", "python -m ingest.load_all")
     dbt_build = cnp_task("dbt_build", "dbt build --project-dir dbt --profiles-dir dbt")
